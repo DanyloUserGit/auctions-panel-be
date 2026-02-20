@@ -1,0 +1,24 @@
+name: Auto Deploy auctions-panel-be
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /var/www/nest-app
+            git pull origin main
+            npm ci
+            npm run build
+            pm2 restart nest-app || pm2 start dist/main.js --name nest-app
+            pm2 save
