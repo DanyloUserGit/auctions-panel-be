@@ -32,25 +32,27 @@ The project is split into two independent applications:
 
 ---
 
-# 🖥 Frontend
+⚙️ Backend
+📌 Overview
 
-## 📌 Overview
-The frontend provides a responsive interface for browsing auctions, placing bids, and managing vehicle listings.
+The backend handles business logic, auctions, bidding rules, authentication, and data storage.
 
-## 🛠 Tech Stack (example)
-- React
-- TypeScript
-- Tailwind CSS / Material UI
-- Axios / Fetch API
+🛠 Tech Stack (example)</br>
 
-## 🚀 Setup
+Node.js + NestJS</br>
+PostgreSQL</br>
+JWT Authentication
+
+🚀 Setup </br>
+cd backend</br>
+npm install</br>
+npm run dev</br>
 
 🔑 Environment Variables
 
-Create .env: </br>
-VITE_API_URL=http://localhost:8000/api
+Create .env:
 
-```bash
-cd frontend
-npm install
-npm run dev
+PORT=5000</br>
+DATABASE_URL=postgresql://user:password@localhost:5432/auction</br>
+JWT_SECRET=your_secret_key</br>
+CORS_ORIGIN=http://localhost:5173</br>
