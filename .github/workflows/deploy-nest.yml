@@ -20,5 +20,5 @@ jobs:
             git pull origin main
             npm ci
             npm run build
-            pm2 restart nest-app || pm2 start dist/main.js --name nest-app
+            pm2 restart auctions-panel-be || pm2 start dist/main.js --name auctions-panel-be
             pm2 save
