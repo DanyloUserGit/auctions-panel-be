@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Roles {
+  SuperAdmin
+  Admin
+  User
+}
+
+enum Rights {
+  Read
+  Write
+  ReadAndWrite
+  Buy
+  Sell
+  BuyAndSell
+}
+
+model User {
+  id        String @id @db.Uuid() @default(cuid())
+  firstName String
+  lastName  String
+  email     String @unique
+  password  String
+  role      String @default("User")
+  rights    String @default("Read")
+}
