@@ -19,6 +19,7 @@ jobs:
             cd /var/www/auctions/auctions-panel-be
             git pull origin main
             npm ci
+            npm install
             npm run build
             pm2 restart auctions-panel-be || pm2 start dist/main.js --name auctions-panel-be
             pm2 save
