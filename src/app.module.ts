@@ -7,8 +7,11 @@ import { UsersModule } from './users/users.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-    }), PrismaModule, UsersModule],
+    }),
+    PrismaModule,
+    UsersModule,
+  ],
   controllers: [],
   providers: [],
 })
-export class AppModule { }
+export class AppModule {}

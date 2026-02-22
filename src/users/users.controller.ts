@@ -1,13 +1,38 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { CreateUserSchema, type CreateUserDto } from './dto/create-user.dto';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
+import { ApiBody, ApiCreatedResponse, ApiTags, getSchemaPath } from '@nestjs/swagger';
+import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
+@ApiTags('users')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) { }
 
   @Post()
+  @ApiBody({ type: CreateUserSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [
+        {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'Uuid' },
+          },
+        },
+        { $ref: getSchemaPath(CreateUserSwaggerDto) }
+      ],
+    },
+  })
   create(@Body() createUserDto: CreateUserDto) {
     const data = CreateUserSchema.parse(createUserDto);
     return this.usersService.create(data);
@@ -24,6 +49,21 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @ApiBody({ type: CreateUserSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [
+        {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'Uuid' },
+          },
+        },
+        { $ref: getSchemaPath(CreateUserSwaggerDto) }
+      ],
+    },
+  })
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     const data = UpdateUserSchema.parse(updateUserDto);
     return this.usersService.update(id, data);
