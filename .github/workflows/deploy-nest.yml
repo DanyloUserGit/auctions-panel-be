@@ -22,5 +22,5 @@ jobs:
             npm install
             npm run prisma:generate
             npm run build
-            pm2 restart auctions-panel-be || pm2 start dist/main.js --name auctions-panel-be
+            pm2 restart auctions-panel-be || pm2 start dist/src/main.js --name auctions-panel-be
             pm2 save
