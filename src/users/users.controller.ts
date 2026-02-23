@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, ApiTags, getSchemaPath } from '@nestjs/swagger';
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
@@ -15,7 +7,7 @@ import { UsersService } from './users.service';
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) { }
+  constructor(private readonly usersService: UsersService) {}
 
   @Post()
   @ApiBody({ type: CreateUserSwaggerDto })
@@ -29,7 +21,7 @@ export class UsersController {
             id: { type: 'string', example: 'Uuid' },
           },
         },
-        { $ref: getSchemaPath(CreateUserSwaggerDto) }
+        { $ref: getSchemaPath(CreateUserSwaggerDto) },
       ],
     },
   })
@@ -60,7 +52,7 @@ export class UsersController {
             id: { type: 'string', example: 'Uuid' },
           },
         },
-        { $ref: getSchemaPath(CreateUserSwaggerDto) }
+        { $ref: getSchemaPath(CreateUserSwaggerDto) },
       ],
     },
   })

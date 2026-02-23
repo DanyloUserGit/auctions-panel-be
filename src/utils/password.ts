@@ -6,7 +6,7 @@ export const hashPassword = async (password: string): Promise<string> => {
 
 export const verifyPassword = async (
   hashedPassword: string,
-  plainPassword: string,
+  plainPassword: string
 ): Promise<boolean> => {
   try {
     return await argon2.verify(hashedPassword, plainPassword);
