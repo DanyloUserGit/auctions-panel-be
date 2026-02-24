@@ -27,9 +27,12 @@ model User {
   lastName      String
   email         String         @unique
   password      String
-  role          String         @default("User")
-  rights        String         @default("Read")
+  role          Roles          @default(User)
+  rights        Rights         @default(Read)
   refreshTokens RefreshToken[]
+  auctions      Auction[]      @relation("UserAuctions")
+  session       Session?       @relation(fields: [sessionId], references: [id])
+  sessionId     String?        @db.Uuid()
 
   @@map("users")
 }
@@ -43,4 +46,51 @@ model RefreshToken {
   createdAt DateTime @default(now())
 
   @@map("refresh_tokens")
+}
+
+model AuctionAuth {
+  id       String @id @default(uuid()) @db.Uuid()
+  email    String
+  password String
+
+  auctionId String  @db.Uuid
+  auction   Auction @relation(fields: [auctionId], references: [id])
+
+  sessions Session[]
+
+  @@map("auction_auths")
+}
+
+model Session {
+  id String @id @default(uuid()) @db.Uuid()
+
+  auctionId String  @db.Uuid
+  auction   Auction @relation(fields: [auctionId], references: [id])
+
+  auctionAuthId String      @db.Uuid
+  account       AuctionAuth @relation(fields: [auctionAuthId], references: [id])
+
+  users User[]
+
+  @@map("sessions")
+}
+
+model Auction {
+  id             String        @id @default(uuid()) @db.Uuid()
+  title          String
+  users          User[]        @relation("UserAuctions")
+  sessions       Session[]
+  auctionAuths   AuctionAuth[]
+  auctionGroup   AuctionGroup? @relation(fields: [auctionGroupId], references: [id])
+  auctionGroupId String?       @db.Uuid()
+
+  @@map("auctions")
+}
+
+model AuctionGroup {
+  id       String    @id @default(uuid()) @db.Uuid()
+  title    String
+  auctions Auction[]
+
+  @@map("auction_groups")
 }

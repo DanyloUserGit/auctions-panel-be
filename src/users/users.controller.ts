@@ -3,6 +3,7 @@ import { ApiBody, ApiCreatedResponse, ApiTags, getSchemaPath } from '@nestjs/swa
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
+import { Public } from 'src/decorators/public.decorator';
 
 @ApiTags('users')
 @Controller('users')
@@ -25,6 +26,7 @@ export class UsersController {
       ],
     },
   })
+  @Public()
   create(@Body() createUserDto: CreateUserDto) {
     const data = CreateUserSchema.parse(createUserDto);
     return this.usersService.create(data);

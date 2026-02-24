@@ -1,31 +1,22 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
   Post,
   Req,
   Res,
-  UseGuards,
+  UseGuards
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
-import { AuthService } from './auth.service';
-import { LoginSchema, LoginSwaggerDto, LoginSwaggerResDto, type LoginDto } from './dto/LoginDto';
 import { AuthGuard } from '@nestjs/passport';
-import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
-import { Public } from 'src/decorators/public';
+import type { Request, Response } from 'express';
+import { Public } from 'src/decorators/public.decorator';
+import { AuthService } from './auth.service';
+import { LoginSchema, type LoginDto } from './dto/LoginDto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
-  @ApiBody({ type: LoginSwaggerDto })
-  @ApiCreatedResponse({
-    description: 'User successfully created',
-    schema: {
-      allOf: [{ $ref: getSchemaPath(LoginSwaggerResDto) }],
-    },
-  })
   @Public()
   @Post('login')
   async login(@Res({ passthrough: true }) res: Response, @Body() body: LoginDto) {
