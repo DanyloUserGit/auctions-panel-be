@@ -3,42 +3,42 @@ import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 import { Public } from 'src/decorators/public.decorator';
 import { AuctionsService } from './auctions.service';
 import { AddUserSchema, AddUserSwaggerDto, type AddUserDto } from './dto/add-user.dto';
-import { CreateAuctionSchema, CreateAuctionSwaggerDto, type CreateAuctionDto } from './dto/create-auction.dto';
+import {
+  CreateAuctionSchema,
+  CreateAuctionSwaggerDto,
+  type CreateAuctionDto,
+} from './dto/create-auction.dto';
 import { UpdateAuctionSchema, type UpdateAuctionDto } from './dto/update-auction.dto';
 
 @Controller('auctions')
 export class AuctionsController {
-  constructor(private readonly auctionsService: AuctionsService) { }
+  constructor(private readonly auctionsService: AuctionsService) {}
 
-  @Post(":id/add-user")
+  @Post(':id/add-user')
   @Public()
   @ApiBody({ type: AddUserSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
     schema: {
-      allOf: [
-        { $ref: getSchemaPath(AddUserSwaggerDto) },
-      ],
+      allOf: [{ $ref: getSchemaPath(AddUserSwaggerDto) }],
     },
   })
-  addUser(@Param("id") auctionId: string, @Body() body: AddUserDto) {
+  addUser(@Param('id') auctionId: string, @Body() body: AddUserDto) {
     const data = AddUserSchema.parse(body);
-    return this.auctionsService.addUser(auctionId, data.userId)
+    return this.auctionsService.addUser(auctionId, data.userId);
   }
-  @Delete(":id/remove-user")
+  @Delete(':id/remove-user')
   @Public()
   @ApiBody({ type: AddUserSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
     schema: {
-      allOf: [
-        { $ref: getSchemaPath(AddUserSwaggerDto) },
-      ],
+      allOf: [{ $ref: getSchemaPath(AddUserSwaggerDto) }],
     },
   })
-  removeUser(@Param("id") auctionId: string, @Body() body: AddUserDto) {
+  removeUser(@Param('id') auctionId: string, @Body() body: AddUserDto) {
     const data = AddUserSchema.parse(body);
-    return this.auctionsService.removeUser(auctionId, data.userId)
+    return this.auctionsService.removeUser(auctionId, data.userId);
   }
 
   @Post()
