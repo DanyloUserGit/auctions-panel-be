@@ -16,13 +16,17 @@ export class AuthController {
     const tokens = await this.authService.login(data);
 
     res.cookie('access_token', tokens.accessToken, {
-      secure: false,
-      sameSite: 'lax',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
     });
 
     res.cookie('refresh_token', tokens.refreshToken, {
-      secure: false,
-      sameSite: 'lax',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
     });
 
     return { success: true };
