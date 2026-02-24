@@ -16,7 +16,7 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, documentFactory);
 
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://155.117.43.95'],
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://155.117.43.95'],
     credentials: true,
   });
   app.use(cookieParser());
