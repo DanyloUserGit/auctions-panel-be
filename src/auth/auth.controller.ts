@@ -7,7 +7,7 @@ import { LoginSchema, type LoginDto } from './dto/LoginDto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   @Public()
   @Post('login')
@@ -17,12 +17,12 @@ export class AuthController {
 
     res.cookie('access_token', tokens.accessToken, {
       secure: false,
-      sameSite: 'lax',
+      sameSite: 'none',
     });
 
     res.cookie('refresh_token', tokens.refreshToken, {
       secure: false,
-      sameSite: 'lax',
+      sameSite: 'none',
     });
 
     return { success: true };
