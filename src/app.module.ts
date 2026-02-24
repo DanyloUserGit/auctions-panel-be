@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuctionsModule } from './auctions/auctions.module';
+import { AuctionGroupsModule } from './auction-groups/auction-groups.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { AuctionsModule } from './auctions/auctions.module';
     UsersModule,
     AuthModule,
     AuctionsModule,
+    AuctionGroupsModule,
   ],
   providers: [
     {
