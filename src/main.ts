@@ -15,7 +15,10 @@ async function bootstrap() {
   const documentFactory = () => SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, documentFactory);
 
-  app.enableCors({ origin: '*' });
+  app.enableCors({
+    origin: ['http://localhost:5173', 'http://155.117.43.95'],
+    credentials: true,
+  });
   app.use(cookieParser());
   await app.listen(process.env.PORT ?? 8000);
   console.log(`The server is running on: http://localhost:${process.env.PORT}`);
