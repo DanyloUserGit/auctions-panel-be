@@ -5,11 +5,10 @@ import { UpdateAuctionDto } from './dto/update-auction.dto';
 
 @Injectable()
 export class AuctionsService {
-  constructor(private prismaService: PrismaService) { }
+  constructor(private prismaService: PrismaService) {}
 
   async create(createAuctionDto: CreateAuctionDto) {
-    const { users, sessions, auctionAuths, auctionGroupId, ...rest } =
-      createAuctionDto;
+    const { users, sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
 
     const auction = await this.prismaService.auction.create({
       data: {
@@ -68,8 +67,7 @@ export class AuctionsService {
   }
 
   async update(id: string, updateAuctionDto: UpdateAuctionDto) {
-    const { users, sessions, auctionAuths, auctionGroupId, ...rest } =
-      updateAuctionDto;
+    const { users, sessions, auctionAuths, auctionGroupId, ...rest } = updateAuctionDto;
 
     return await this.prismaService.auction.update({
       where: { id },
@@ -77,9 +75,7 @@ export class AuctionsService {
         ...rest,
 
         ...(auctionGroupId !== undefined && {
-          auctionGroup: auctionGroupId
-            ? { connect: { id: auctionGroupId } }
-            : { disconnect: true },
+          auctionGroup: auctionGroupId ? { connect: { id: auctionGroupId } } : { disconnect: true },
         }),
 
         ...(users && {

@@ -8,4 +8,4 @@ import { AuctionsService } from './auctions.service';
   controllers: [AuctionsController],
   providers: [AuctionsService],
 })
-export class AuctionsModule { }
+export class AuctionsModule {}
