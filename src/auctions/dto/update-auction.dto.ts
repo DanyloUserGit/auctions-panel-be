@@ -1,4 +1,6 @@
-import { PartialType } from '@nestjs/swagger';
-import { CreateAuctionDto } from './create-auction.dto';
+import { z } from 'zod';
+import { CreateAuctionSchema } from './create-auction.dto';
 
-export class UpdateAuctionDto extends PartialType(CreateAuctionDto) {}
+export const UpdateAuctionSchema = CreateAuctionSchema.partial();
+
+export type UpdateAuctionDto = z.infer<typeof UpdateAuctionSchema>;
