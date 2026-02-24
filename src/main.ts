@@ -20,6 +20,7 @@ async function bootstrap() {
     credentials: true,
   });
   app.use(cookieParser());
+  app.setGlobalPrefix('api');
   await app.listen(process.env.PORT ?? 8000);
   console.log(`The server is running on: http://localhost:${process.env.PORT}`);
 }
