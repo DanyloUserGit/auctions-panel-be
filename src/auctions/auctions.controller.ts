@@ -1,34 +1,105 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
+import { Public } from 'src/decorators/public.decorator';
 import { AuctionsService } from './auctions.service';
-import { CreateAuctionDto } from './dto/create-auction.dto';
-import { UpdateAuctionDto } from './dto/update-auction.dto';
+import { AddUserSchema, AddUserSwaggerDto, type AddUserDto } from './dto/add-user.dto';
+import { CreateAuctionSchema, CreateAuctionSwaggerDto, type CreateAuctionDto } from './dto/create-auction.dto';
+import { UpdateAuctionSchema, type UpdateAuctionDto } from './dto/update-auction.dto';
 
 @Controller('auctions')
 export class AuctionsController {
-  constructor(private readonly auctionsService: AuctionsService) {}
+  constructor(private readonly auctionsService: AuctionsService) { }
+
+  @Post(":id/add-user")
+  @Public()
+  @ApiBody({ type: AddUserSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [
+        { $ref: getSchemaPath(AddUserSwaggerDto) },
+      ],
+    },
+  })
+  addUser(@Param("id") auctionId: string, @Body() body: AddUserDto) {
+    const data = AddUserSchema.parse(body);
+    return this.auctionsService.addUser(auctionId, data.userId)
+  }
+  @Delete(":id/remove-user")
+  @Public()
+  @ApiBody({ type: AddUserSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [
+        { $ref: getSchemaPath(AddUserSwaggerDto) },
+      ],
+    },
+  })
+  removeUser(@Param("id") auctionId: string, @Body() body: AddUserDto) {
+    const data = AddUserSchema.parse(body);
+    return this.auctionsService.removeUser(auctionId, data.userId)
+  }
 
   @Post()
+  @Public()
+  @ApiBody({ type: CreateAuctionSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [
+        {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'Uuid' },
+          },
+        },
+        { $ref: getSchemaPath(CreateAuctionSwaggerDto) },
+      ],
+    },
+  })
   create(@Body() createAuctionDto: CreateAuctionDto) {
-    return this.auctionsService.create(createAuctionDto);
+    const data = CreateAuctionSchema.parse(createAuctionDto);
+    return this.auctionsService.create(data);
   }
 
   @Get()
+  @Public()
   findAll() {
     return this.auctionsService.findAll();
   }
 
   @Get(':id')
+  @Public()
   findOne(@Param('id') id: string) {
-    return this.auctionsService.findOne(+id);
+    return this.auctionsService.findOne(id);
   }
 
   @Patch(':id')
+  @Public()
+  @ApiBody({ type: CreateAuctionSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [
+        {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: 'Uuid' },
+          },
+        },
+        { $ref: getSchemaPath(CreateAuctionSwaggerDto) },
+      ],
+    },
+  })
   update(@Param('id') id: string, @Body() updateAuctionDto: UpdateAuctionDto) {
-    return this.auctionsService.update(+id, updateAuctionDto);
+    const data = UpdateAuctionSchema.parse(updateAuctionDto);
+    return this.auctionsService.update(id, data);
   }
 
+  @Public()
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.auctionsService.remove(+id);
+    return this.auctionsService.remove(id);
   }
 }
