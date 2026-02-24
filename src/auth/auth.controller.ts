@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Req,
-  Res,
-  UseGuards
-} from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { Public } from 'src/decorators/public.decorator';
@@ -15,7 +7,7 @@ import { LoginSchema, type LoginDto } from './dto/LoginDto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService) {}
 
   @Public()
   @Post('login')
@@ -24,14 +16,12 @@ export class AuthController {
     const tokens = await this.authService.login(data);
 
     res.cookie('access_token', tokens.accessToken, {
-      httpOnly: true,
-      secure: true,
+      secure: false,
       sameSite: 'lax',
     });
 
     res.cookie('refresh_token', tokens.refreshToken, {
-      httpOnly: true,
-      secure: true,
+      secure: false,
       sameSite: 'lax',
     });
 
