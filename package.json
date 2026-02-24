@@ -24,7 +24,6 @@
     "prettier:check": "prettier --check \"src/**/*.{ts,js,json,md}\"",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "tsx prisma/seed.ts",
     "prisma:reset": "prisma migrate reset",
     "prisma:generate": "prisma generate"
   },
