@@ -1,26 +1,77 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateAuctionGroupDto } from './dto/create-auction-group.dto';
 import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
 
 @Injectable()
 export class AuctionGroupsService {
-  create(createAuctionGroupDto: CreateAuctionGroupDto) {
-    return 'This action adds a new auctionGroup';
+  constructor(private prisma: PrismaService) {}
+
+  async create(createAuctionGroupDto: CreateAuctionGroupDto) {
+    const { auctions, ...rest } = createAuctionGroupDto;
+
+    return await this.prisma.auctionGroup.create({
+      data: {
+        ...rest,
+
+        ...(auctions && {
+          auctions: {
+            connect: auctions.map((id) => ({ id })),
+          },
+        }),
+      },
+      include: {
+        auctions: true,
+      },
+    });
   }
 
-  findAll() {
-    return `This action returns all auctionGroups`;
+  async findAll() {
+    return await this.prisma.auctionGroup.findMany({
+      include: {
+        auctions: true,
+      },
+    });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} auctionGroup`;
+  async findOne(id: string) {
+    const group = await this.prisma.auctionGroup.findUnique({
+      where: { id },
+      include: {
+        auctions: true,
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException('AuctionGroup not found');
+    }
+
+    return group;
   }
 
-  update(id: number, updateAuctionGroupDto: UpdateAuctionGroupDto) {
-    return `This action updates a #${id} auctionGroup`;
+  async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto) {
+    const { auctions, ...rest } = updateAuctionGroupDto;
+
+    return await this.prisma.auctionGroup.update({
+      where: { id },
+      data: {
+        ...rest,
+
+        ...(auctions && {
+          auctions: {
+            set: auctions.map((id) => ({ id })),
+          },
+        }),
+      },
+      include: {
+        auctions: true,
+      },
+    });
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} auctionGroup`;
+  async remove(id: string) {
+    return await this.prisma.auctionGroup.delete({
+      where: { id },
+    });
   }
 }
