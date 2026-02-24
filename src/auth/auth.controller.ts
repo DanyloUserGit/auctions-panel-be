@@ -17,12 +17,12 @@ export class AuthController {
 
     res.cookie('access_token', tokens.accessToken, {
       secure: false,
-      sameSite: 'none',
+      sameSite: 'lax',
     });
 
     res.cookie('refresh_token', tokens.refreshToken, {
       secure: false,
-      sameSite: 'none',
+      sameSite: 'lax',
     });
 
     return { success: true };
