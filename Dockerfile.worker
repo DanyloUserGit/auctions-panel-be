@@ -1,0 +1,21 @@
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build browser-worker 
+
+FROM mcr.microsoft.com/playwright:v1.49.0-node22
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y xvfb ffmpeg && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/dist ./dist
+
+RUN npm ci --production
+
+ENV NODE_ENV=production
+ENV DISPLAY=:99 
+
+CMD ["xvfb-run", "--server-args=-screen 0 1280x720x24", "node", "dist/apps/browser-worker/main.js"]

@@ -1,0 +1,15 @@
+#docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: '3.8'
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    volumes:
+      - .:/app
+      - /app/node_modules 
+    command: npm run start:dev auctions-panel-be
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./apps/auctions-panel-be/.env
