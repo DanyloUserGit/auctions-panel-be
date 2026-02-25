@@ -7,7 +7,7 @@ import { LoginSchema, type LoginDto } from './dto/LoginDto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService) {}
 
   @Public()
   @Post('login')

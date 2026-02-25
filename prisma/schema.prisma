@@ -18,7 +18,7 @@ enum Rights {
   ReadAndWrite
   Buy
   Sell
-  BuyAndSell 
+  BuyAndSell
   All
 }
 
@@ -64,6 +64,10 @@ model AuctionAuth {
 
 model Session {
   id String @id @default(uuid()) @db.Uuid()
+
+  maxConnections    Int
+  activeConnections Int
+  isActive          Boolean
 
   auctionId String  @db.Uuid
   auction   Auction @relation(fields: [auctionId], references: [id])

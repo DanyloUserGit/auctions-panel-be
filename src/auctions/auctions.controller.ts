@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 import { Public } from 'src/decorators/public.decorator';
 import { AuctionsService } from './auctions.service';
@@ -13,6 +13,16 @@ import { UpdateAuctionSchema, type UpdateAuctionDto } from './dto/update-auction
 @Controller('auctions')
 export class AuctionsController {
   constructor(private readonly auctionsService: AuctionsService) {}
+
+  @Get('search')
+  @Public()
+  search(@Query('q') query: string, @Query('auctionGroupId') auctionGroupId: string, @Req() req) {
+    return this.auctionsService.search({
+      user: req.user,
+      query,
+      auctionGroupId,
+    });
+  }
 
   @Post(':id/add-user')
   @Public()
@@ -65,14 +75,14 @@ export class AuctionsController {
 
   @Get()
   @Public()
-  findAll() {
-    return this.auctionsService.findAll();
+  findAll(@Req() req) {
+    return this.auctionsService.findAll(req.user);
   }
 
   @Get(':id')
   @Public()
-  findOne(@Param('id') id: string) {
-    return this.auctionsService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req) {
+    return this.auctionsService.findOne(id, req.user);
   }
 
   @Patch(':id')
