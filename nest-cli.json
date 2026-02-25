@@ -1,8 +1,32 @@
 {
   "$schema": "https://json.schemastore.org/nest-cli",
   "collection": "@nestjs/schematics",
-  "sourceRoot": "src",
+  "sourceRoot": "apps/auctions-panel-be/src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "deleteOutDir": true,
+    "webpack": true,
+    "tsConfigPath": "apps/auctions-panel-be/tsconfig.app.json"
+  },
+  "monorepo": true,
+  "root": "apps/auctions-panel-be",
+  "projects": {
+    "auctions-panel-be": {
+      "type": "application",
+      "root": "apps/auctions-panel-be",
+      "entryFile": "main",
+      "sourceRoot": "apps/auctions-panel-be/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/auctions-panel-be/tsconfig.app.json"
+      }
+    },
+    "browser-worker": {
+      "type": "application",
+      "root": "apps/browser-worker",
+      "entryFile": "main",
+      "sourceRoot": "apps/browser-worker/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/browser-worker/tsconfig.app.json"
+      }
+    }
   }
 }
