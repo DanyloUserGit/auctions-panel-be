@@ -1,8 +1,9 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
+  UnauthorizedException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
@@ -36,6 +37,11 @@ export class AuthService {
 
     if (!existing) {
       throw new NotFoundException('Користувача не знайдено');
+    }
+
+    const isValidPass = await verifyPassword(existing.password, user.password);
+    if (!isValidPass) {
+      throw new ForbiddenException("Паролі не співпадають")
     }
 
     const payload = {
