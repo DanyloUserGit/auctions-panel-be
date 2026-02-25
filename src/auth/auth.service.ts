@@ -1,8 +1,9 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
+  UnauthorizedException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
@@ -18,7 +19,7 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private prisma: PrismaService
-  ) {}
+  ) { }
 
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.usersService.findOneByEmail(email);
@@ -36,6 +37,11 @@ export class AuthService {
 
     if (!existing) {
       throw new NotFoundException('Користувача не знайдено');
+    }
+
+    const isValidPass = await verifyPassword(existing.password, user.password);
+    if (!isValidPass) {
+      throw new ForbiddenException("Паролі не співпадають")
     }
 
     const payload = {
@@ -64,6 +70,9 @@ export class AuthService {
   }
 
   async refresh(oldRefreshToken: string) {
+    if (!oldRefreshToken) {
+      throw new UnauthorizedException('Неправильний попередній refresh token');
+    }
     const tokenRecord = await this.prisma.refreshToken.findUnique({
       where: { token: oldRefreshToken },
       include: { user: true },
