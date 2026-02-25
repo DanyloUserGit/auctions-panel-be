@@ -74,13 +74,11 @@ export class AuctionsController {
   }
 
   @Get()
-  @Public()
   findAll(@Req() req) {
     return this.auctionsService.findAll(req.user);
   }
 
   @Get(':id')
-  @Public()
   findOne(@Param('id') id: string, @Req() req) {
     return this.auctionsService.findOne(id, req.user);
   }
