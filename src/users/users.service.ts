@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { hashPassword } from 'src/utils/password';
 import { CreateUserDto } from './dto/create-user.dto';
+import { SearchUserDto } from './dto/search-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
@@ -66,5 +68,60 @@ export class UsersService {
     return await this.prisma.user.delete({
       where: { id },
     });
+  }
+  async searchUsers(dto: SearchUserDto) {
+    const { query, page = 1, limit = 10 } = dto;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.UserWhereInput = query
+      ? {
+          OR: [
+            {
+              firstName: {
+                contains: query,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+            {
+              lastName: {
+                contains: query,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+            {
+              email: {
+                contains: query,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+          ],
+        }
+      : {};
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          rights: true,
+        },
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data: users,
+      meta: {
+        total,
+        page,
+        lastPage: Math.ceil(total / limit),
+      },
+    };
   }
 }

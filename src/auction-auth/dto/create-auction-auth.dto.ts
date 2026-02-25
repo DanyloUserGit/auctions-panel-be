@@ -1,0 +1,36 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { z } from 'zod';
+
+export const CreateAuctionAuthSchema = z.object({
+  email: z.string().email({
+    message: 'Email має бути валідним.',
+  }),
+
+  password: z.string().min(6, { message: 'Пароль має містити мінімум 6 символів.' }),
+
+  auctionId: z.string().uuid({
+    message: 'auctionId має бути валідним UUID.',
+  }),
+});
+
+export type CreateAuctionAuthDto = z.infer<typeof CreateAuctionAuthSchema>;
+
+export class CreateAuctionAuthSwaggerDto {
+  @ApiProperty({
+    example: 'user@example.com',
+    description: 'Email для входу в аукціон',
+  })
+  email: string;
+
+  @ApiProperty({
+    example: 'securePassword123',
+    description: 'Пароль доступу до аукціону',
+  })
+  password: string;
+
+  @ApiProperty({
+    example: 'uuid-auction-id',
+    description: 'ID аукціону',
+  })
+  auctionId: string;
+}

@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -13,7 +18,7 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private prisma: PrismaService
-  ) { }
+  ) {}
 
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.usersService.findOneByEmail(email);
@@ -27,14 +32,19 @@ export class AuthService {
   }
 
   async login(user: LoginDto) {
-
     const existing = await this.usersService.findOneByEmail(user.email);
 
     if (!existing) {
-      throw new NotFoundException("Користувача не знайдено")
+      throw new NotFoundException('Користувача не знайдено');
     }
 
-    const payload = { id: existing.id, email: existing.email, firstName: existing.firstName, lastName: existing.lastName, role: existing.role };
+    const payload = {
+      id: existing.id,
+      email: existing.email,
+      firstName: existing.firstName,
+      lastName: existing.lastName,
+      role: existing.role,
+    };
 
     const accessToken = this.jwtService.sign(payload, {
       expiresIn: '15m',
