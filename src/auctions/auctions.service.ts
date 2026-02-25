@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Roles } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
@@ -43,8 +44,26 @@ export class AuctionsService {
     return auction;
   }
 
-  async findAll() {
-    return await this.prismaService.auction.findMany({
+  async findAll(user?: { id: string; role: Roles }) {
+    if (!user?.id) return [];
+
+    if (user?.role === Roles.SuperAdmin) {
+      return this.prismaService.auction.findMany({
+        include: {
+          users: true,
+          sessions: true,
+          auctionAuths: true,
+          auctionGroup: true,
+        },
+      });
+    }
+
+    return this.prismaService.auction.findMany({
+      where: {
+        users: {
+          some: { id: user.id },
+        },
+      },
       include: {
         users: true,
         sessions: true,
@@ -54,9 +73,36 @@ export class AuctionsService {
     });
   }
 
-  async findOne(id: string) {
-    return await this.prismaService.auction.findUnique({
-      where: { id },
+  async findOne(id: string, user?: { id: string; role: Roles }) {
+    if (!user?.id) {
+      throw new ForbiddenException('Потрібна авторизація');
+    }
+
+    if (user?.role === Roles.Admin) {
+      const auction = await this.prismaService.auction.findUnique({
+        where: { id },
+        include: {
+          users: true,
+          sessions: true,
+          auctionAuths: true,
+          auctionGroup: true,
+        },
+      });
+
+      if (!auction) {
+        throw new NotFoundException('Аукціон не знайдено');
+      }
+
+      return auction;
+    }
+
+    const auction = await this.prismaService.auction.findFirst({
+      where: {
+        id,
+        users: {
+          some: { id: user.id },
+        },
+      },
       include: {
         users: true,
         sessions: true,
@@ -64,6 +110,12 @@ export class AuctionsService {
         auctionGroup: true,
       },
     });
+
+    if (!auction) {
+      throw new NotFoundException('Аукціон не знайдено або немає доступу');
+    }
+
+    return auction;
   }
 
   async update(id: string, updateAuctionDto: UpdateAuctionDto) {
@@ -152,6 +204,55 @@ export class AuctionsService {
           disconnect: { id: userId },
         },
       },
+    });
+  }
+
+  async search(params: {
+    user?: { id: string; role: Roles };
+    query?: string;
+    auctionGroupId?: string;
+  }) {
+    const { user, query, auctionGroupId } = params;
+
+    const isAdmin = user?.role === Roles.Admin;
+
+    return this.prismaService.auction.findMany({
+      where: {
+        AND: [
+          query
+            ? {
+                OR: [
+                  {
+                    title: {
+                      contains: query,
+                      mode: 'insensitive',
+                    },
+                  },
+                  {
+                    url: {
+                      contains: query,
+                      mode: 'insensitive',
+                    },
+                  },
+                ],
+              }
+            : {},
+
+          auctionGroupId ? { auctionGroupId } : {},
+
+          !isAdmin
+            ? {
+                users: {
+                  some: { id: user?.id },
+                },
+              }
+            : {},
+        ],
+      },
+      include: {
+        auctionGroup: true,
+      },
+      orderBy: { title: 'asc' },
     });
   }
 }

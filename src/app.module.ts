@@ -9,6 +9,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuctionsModule } from './auctions/auctions.module';
 import { AuctionGroupsModule } from './auction-groups/auction-groups.module';
+import { AuctionAuthModule } from './auction-auth/auction-auth.module';
+import { SessionsModule } from './sessions/sessions.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { AuctionGroupsModule } from './auction-groups/auction-groups.module';
     AuthModule,
     AuctionsModule,
     AuctionGroupsModule,
+    AuctionAuthModule,
+    SessionsModule,
   ],
   providers: [
     {

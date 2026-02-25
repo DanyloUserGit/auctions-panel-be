@@ -1,5 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
+import { Public } from 'src/decorators/public.decorator';
 import { AuctionGroupsService } from './auction-groups.service';
+import { AddAuctionSchema, AddAuctionSwaggerDto, type AddAuctionDto } from './dto/add-auction.dto';
 import {
   CreateAuctionGroupSchema,
   CreateAuctionGroupSwaggerDto,
@@ -9,13 +12,45 @@ import {
   UpdateAuctionGroupSchema,
   type UpdateAuctionGroupDto,
 } from './dto/update-auction-group.dto';
-import { Public } from 'src/decorators/public.decorator';
-import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 
 @Controller('auction-groups')
 export class AuctionGroupsController {
   constructor(private readonly auctionGroupsService: AuctionGroupsService) {}
 
+  @Get('search')
+  @Public()
+  search(@Query('q') query: string, @Req() req) {
+    return this.auctionGroupsService.search({
+      user: req.user,
+      query,
+    });
+  }
+  @Post(':id/add-auction')
+  @Public()
+  @ApiBody({ type: AddAuctionSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [{ $ref: getSchemaPath(AddAuctionSwaggerDto) }],
+    },
+  })
+  addUser(@Param('id') auctionId: string, @Body() body: AddAuctionDto) {
+    const data = AddAuctionSchema.parse(body);
+    return this.auctionGroupsService.addAuction(auctionId, data.auctionId);
+  }
+  @Delete(':id/remove-user')
+  @Public()
+  @ApiBody({ type: AddAuctionSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'User successfully created',
+    schema: {
+      allOf: [{ $ref: getSchemaPath(AddAuctionSwaggerDto) }],
+    },
+  })
+  removeUser(@Param('id') auctionId: string, @Body() body: AddAuctionDto) {
+    const data = AddAuctionSchema.parse(body);
+    return this.auctionGroupsService.removeAuction(auctionId, data.auctionId);
+  }
   @Post()
   @Public()
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
@@ -39,13 +74,13 @@ export class AuctionGroupsController {
   }
 
   @Get()
-  findAll() {
-    return this.auctionGroupsService.findAll();
+  findAll(@Req() req) {
+    return this.auctionGroupsService.findAll(req.user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.auctionGroupsService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req) {
+    return this.auctionGroupsService.findOne(id, req.user);
   }
 
   @Patch(':id')

@@ -1,14 +1,32 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiBody, ApiCreatedResponse, ApiTags, getSchemaPath } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  ApiBody,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  getSchemaPath,
+} from '@nestjs/swagger';
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 import { Public } from 'src/decorators/public.decorator';
+import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
 
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Get('search')
+  @ApiOperation({ summary: 'Search users with pagination' })
+  @ApiOkResponse({
+    description: 'Users found successfully',
+    type: SearchUserResponseDto,
+  })
+  async search(@Query() dto: SearchUserDto): Promise<SearchUserResponseDto> {
+    return this.usersService.searchUsers(dto);
+  }
 
   @Post()
   @ApiBody({ type: CreateUserSwaggerDto })
