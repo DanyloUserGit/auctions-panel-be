@@ -13,14 +13,14 @@ async function bootstrap() {
     .build();
 
   const documentFactory = () => SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, documentFactory);
+  app.setGlobalPrefix('api');
+  SwaggerModule.setup('/api/docs', app, documentFactory);
 
   app.enableCors({
     origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org'],
     credentials: true,
   });
   app.use(cookieParser());
-  app.setGlobalPrefix('api');
   await app.listen(process.env.PORT ?? 8000);
   console.log(`The server is running on: http://localhost:${process.env.PORT}`);
 }
