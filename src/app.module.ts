@@ -3,14 +3,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { StringValue } from 'ms';
+import { AuctionAuthModule } from './auction-auth/auction-auth.module';
+import { AuctionGroupsModule } from './auction-groups/auction-groups.module';
+import { AuctionsModule } from './auctions/auctions.module';
 import { JwtAuthGuard } from './auth/auth.guard';
 import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
-import { UsersModule } from './users/users.module';
-import { AuctionsModule } from './auctions/auctions.module';
-import { AuctionGroupsModule } from './auction-groups/auction-groups.module';
-import { AuctionAuthModule } from './auction-auth/auction-auth.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -42,4 +42,4 @@ import { SessionsModule } from './sessions/sessions.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
