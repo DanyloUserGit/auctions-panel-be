@@ -73,9 +73,9 @@ export class AuctionsController {
     return this.auctionsService.create(data);
   }
 
-  @Get()
-  findAll(@Req() req) {
-    return this.auctionsService.findAll(req.user);
+  @Get(':groupId')
+  findAll(@Req() req, @Param('groupId') groupId: string) {
+    return this.auctionsService.findAll(groupId, req.user);
   }
 
   @Get(':id')

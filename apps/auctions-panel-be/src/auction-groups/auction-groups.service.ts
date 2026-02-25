@@ -28,7 +28,7 @@ export class AuctionGroupsService {
     });
   }
 
-  async findAll(userId: string, user?: { id: string; role: Roles }) {
+  async findAll(user?: { id: string; role: Roles }) {
     if (!user?.id) return [];
 
     if (user?.role === Roles.SuperAdmin) {
@@ -38,7 +38,7 @@ export class AuctionGroupsService {
             where: {
               users: {
                 some: {
-                  id: userId,
+                  id: user.id,
                 },
               },
             },
@@ -53,7 +53,7 @@ export class AuctionGroupsService {
           some: {
             users: {
               some: {
-                id: userId,
+                id: user.id,
               },
             },
           },
@@ -64,7 +64,7 @@ export class AuctionGroupsService {
           where: {
             users: {
               some: {
-                id: userId,
+                id: user.id,
               },
             },
           },
