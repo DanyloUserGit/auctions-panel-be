@@ -1,8 +1,8 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Roles } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
-import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuctionsService {
@@ -44,11 +44,12 @@ export class AuctionsService {
     return auction;
   }
 
-  async findAll(user?: { id: string; role: Roles }) {
+  async findAll(groupId: string, user?: { id: string; role: Roles }) {
     if (!user?.id) return [];
 
     if (user?.role === Roles.SuperAdmin) {
       return this.prismaService.auction.findMany({
+        where: { auctionGroupId: groupId },
         include: {
           users: true,
           sessions: true,
@@ -63,6 +64,7 @@ export class AuctionsService {
         users: {
           some: { id: user.id },
         },
+        auctionGroupId: groupId,
       },
       include: {
         users: true,
