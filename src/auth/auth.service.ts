@@ -18,7 +18,7 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private prisma: PrismaService
-  ) {}
+  ) { }
 
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.usersService.findOneByEmail(email);
@@ -64,6 +64,9 @@ export class AuthService {
   }
 
   async refresh(oldRefreshToken: string) {
+    if (!oldRefreshToken) {
+      throw new UnauthorizedException('Неправильний попередній refresh token');
+    }
     const tokenRecord = await this.prisma.refreshToken.findUnique({
       where: { token: oldRefreshToken },
       include: { user: true },
