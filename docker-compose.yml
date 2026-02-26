@@ -16,10 +16,15 @@ services:
       dockerfile: Dockerfile.api
     depends_on:
       - rabbitmq
+    # Додаємо це, щоб файл був фізично доступний Prisma всередині контейнера
+    volumes:
+      - ./apps/auctions-panel-be/.env:/app/.env
     env_file:
       - ./apps/auctions-panel-be/.env
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
+    # Видаліть або закоментуйте явне призначення DATABASE_URL, 
+    # якщо хочете, щоб вона бралася ТІЛЬКИ з env_file
+    # environment:
+    #   - DATABASE_URL=${DATABASE_URL} 
     ports:
       - "8000:8000"
     restart: always
