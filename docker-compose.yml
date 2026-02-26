@@ -17,9 +17,7 @@ services:
     depends_on:
       - rabbitmq
     env_file:
-      - ./apps/auctions-panel-be/.env
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - .env
     ports:
       - "8000:8000"
     restart: always
@@ -31,6 +29,6 @@ services:
     depends_on:
       - rabbitmq
     env_file:
-      - ./apps/auctions-panel-be/.env
+      - .env
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672

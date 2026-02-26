@@ -34,15 +34,7 @@ export class AuctionGroupsService {
     if (user?.role === Roles.SuperAdmin) {
       return this.prisma.auctionGroup.findMany({
         include: {
-          auctions: {
-            where: {
-              users: {
-                some: {
-                  id: user.id,
-                },
-              },
-            },
-          },
+          auctions: true
         },
       });
     }
