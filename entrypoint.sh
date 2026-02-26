@@ -1,15 +1,17 @@
 #!/bin/sh
 set -e
 
-# Шлях до файлу зі змінними всередині контейнера
-# Docker Compose монтує змінні з env_file в оточення, 
-# але ми можемо перестрахуватися:
+# Завантажуємо змінні з .env, якщо він існує
 if [ -f .env ]; then
-  export $(echo $(cat .env | sed 's/#.*//g' | xargs) | envsubst)
+  echo "Loading variables from .env"
+  export $(grep -v '^#' .env | xargs)
 fi
 
+# Перевірка, чи змінна встановилася (для дебагу в логах)
+echo "DATABASE_URL is set to: $DATABASE_URL"
+
 echo "Running database migrations..."
-# Додаємо пряме вказання DATABASE_URL, якщо вона є в оточенні
-npx prisma migrate deploy --schema=./prisma/schema.prisma
+# Прямо передаємо змінну в команду Prisma
+DATABASE_URL=$DATABASE_URL npx prisma migrate deploy --schema=./prisma/schema.prisma
 
 exec "$@"
