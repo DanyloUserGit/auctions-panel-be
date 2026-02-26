@@ -25,7 +25,6 @@ jobs:
             docker image prune -f
 
             echo "Running database migrations..."
-            docker compose run --rm api npx prisma migrate deploy
-
+            docker compose exec api npx prisma migrate deploy
 
             docker compose ps
