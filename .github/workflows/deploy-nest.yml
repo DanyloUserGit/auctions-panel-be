@@ -7,7 +7,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
@@ -16,9 +15,9 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /var/www/auctions/auctions-panel-be
-            git pull origin main
-            npm ci
-            npm run build
-            pm2 restart auctions-panel-be || pm2 start dist/main.js --name auctions-panel-be
-            pm2 save
+              set -e
+              cd /var/www/auctions/auctions-panel-be
+              git pull origin main
+              docker compose up -d --build --remove-orphans
+              docker image prune -f
+              docker compose ps
