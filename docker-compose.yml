@@ -36,6 +36,6 @@ services:
     depends_on:
       - rabbitmq
     env_file:
-      - ./apps/auctions-panel-be/.env
+      - .env
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672
