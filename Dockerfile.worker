@@ -1,6 +1,5 @@
 FROM mcr.microsoft.com/playwright:v1.42.0-jammy
 
-# Встановлюємо Node 22 вручну
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
