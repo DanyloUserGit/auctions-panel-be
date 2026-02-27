@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
+import { ApiBody, ApiCreatedResponse, ApiQuery, getSchemaPath } from '@nestjs/swagger';
 import { AuctionsService } from './auctions.service';
 import { AddUserSchema, AddUserSwaggerDto, type AddUserDto } from './dto/add-user.dto';
 import {
@@ -15,7 +15,7 @@ export class AuctionsController {
   constructor(private readonly auctionsService: AuctionsService) {}
 
   @Get('search')
-  @Public()
+  @ApiQuery({ name: 'auctionGroupId', required: false, type: String })
   search(@Query('q') query: string, @Req() req,  @Query('auctionGroupId') auctionGroupId?: string) {
     return this.auctionsService.search({
       user: req.user,
