@@ -9,7 +9,7 @@ export const CreateUserSchema = z.object({
   role: z.enum(['SuperAdmin', 'Admin', 'User'], {
     message: 'Потрібно обрати 1 з наступних ролей: SuperAdmin, Admin, User.',
   }),
-  rights: z.enum(['Read', 'Write', 'ReadAndWrite', 'Buy', 'Sell', 'BuyAndSell'], {
+  rights: z.enum(['Read', 'Write', 'All'], {
     message: 'Потрібно обрати права зі списку: Read, Write, ReadAndWrite, Buy, Sell, BuyAndSell.',
   }),
 });

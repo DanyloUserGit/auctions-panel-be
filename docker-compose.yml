@@ -1,6 +1,15 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: auctions_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
   rabbitmq:
     image: rabbitmq:3-management
     ports:
@@ -34,3 +43,5 @@ services:
       - .env
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672
+volumes:
+  postgres_data:

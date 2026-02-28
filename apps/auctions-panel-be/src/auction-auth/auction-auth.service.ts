@@ -4,13 +4,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAuctionAuthDto } from './dto/create-auction-auth.dto';
 import { UpdateAuctionAuthDto } from './dto/update-auction-auth.dto';
 import { hashPassword } from '../utils/password';
+import { encryptData } from '../utils/encrypt';
 
 @Injectable()
 export class AuctionAuthService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateAuctionAuthDto) {
-    const hashedPassword = await hashPassword(dto.password);
+    const hashedPassword = encryptData(dto.password);
 
     try {
       return await this.prisma.auctionAuth.create({

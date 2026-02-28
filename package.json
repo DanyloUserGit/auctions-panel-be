@@ -44,7 +44,9 @@
     "@nestjs/microservices": "^11.1.14",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.1.14",
     "@nestjs/swagger": "^11.2.6",
+    "@nestjs/websockets": "^11.1.14",
     "@prisma/adapter-pg": "^7.4.1",
     "@prisma/client": "^7.4.1",
     "amqp-connection-manager": "^5.0.0",
@@ -62,6 +64,9 @@
     "playwright": "^1.58.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "werift": "^0.22.9",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -72,6 +77,7 @@
     "@nestjs/testing": "^11.0.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
+    "@types/fluent-ffmpeg": "^2.1.28",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.19.11",
     "@types/passport-local": "^1.0.38",
