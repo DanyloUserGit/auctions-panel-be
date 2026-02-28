@@ -1,14 +1,27 @@
 version: '3.8'
+
 services:
-  api:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  browser-worker:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: Dockerfile.worker
     volumes:
       - .:/app
       - /app/node_modules 
-    command: npm run start:dev auctions-panel-be
-    ports:
-      - "8000:8000"
+    # ОНОВЛЕНИЙ РЯДОК: Спершу ставимо всі пакети (включаючи dev), а потім запускаємо
+    command: sh -c "npm install && npm run start:dev browser-worker"
+    environment:
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - NODE_ENV=development
+      - DISPLAY=:99
     env_file:
-      - ./apps/auctions-panel-be/.env
+      - .env
+    depends_on:
+      - rabbitmq
+    shm_size: '2gb'

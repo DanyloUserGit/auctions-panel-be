@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { BrowserWorkerController } from './browser-worker.controller';
-import { BrowserWorkerService } from './browser-worker.service';
+import { BrowserService } from './browser-worker.service';
+import { WebrtcService } from '../webrtc/webrtc.service';
 
 @Module({
   imports: [],
   controllers: [BrowserWorkerController],
-  providers: [BrowserWorkerService],
+  providers: [BrowserService, WebrtcService],
 })
 export class BrowserWorkerModule {}

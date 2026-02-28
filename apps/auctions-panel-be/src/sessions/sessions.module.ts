@@ -3,6 +3,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SessionsController } from './sessions.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SessionsService } from './sessions.service';
+import { SessionGateway } from './session.gateway';
 
 @Module({
   imports: [
@@ -22,6 +23,6 @@ import { SessionsService } from './sessions.service';
     PrismaModule,
   ],
   controllers: [SessionsController],
-  providers: [SessionsService],
+  providers: [SessionsService, SessionGateway],
 })
 export class SessionsModule {}

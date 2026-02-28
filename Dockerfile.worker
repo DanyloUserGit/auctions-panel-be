@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.42.0-jammy
+FROM mcr.microsoft.com/playwright:v1.58.2-jammy
 
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
@@ -23,4 +23,4 @@ RUN npm prune --production
 ENV NODE_ENV=production
 ENV DISPLAY=:99 
 
-CMD ["xvfb-run", "--server-args=-screen 0 1280x720x24", "node", "dist/apps/browser-worker/main.js"]
+CMD ["xvfb-run", "-s", "-screen 0 1920x1080x24", "node", "dist/apps/browser-worker/main.js"]
