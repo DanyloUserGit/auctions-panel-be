@@ -10,7 +10,7 @@ socket.on("connect", () => {
   // УВАГА: Заміни userId та auctionId на реальні ID з твоєї локальної бази даних Prisma!
   const payload = {
     userId: "139496cf-384d-4b62-8745-1b70729797b8", 
-    auctionId: "739e7c74-f41e-4ac3-834b-0b1d4043110d",
+    auctionId: "492b3f70-c05d-45b5-9a18-b575aeefeec6",
     width: 1280,
     height: 720
   };
