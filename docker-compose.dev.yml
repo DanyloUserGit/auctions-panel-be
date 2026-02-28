@@ -14,8 +14,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules 
-    # ОНОВЛЕНИЙ РЯДОК: Спершу ставимо всі пакети (включаючи dev), а потім запускаємо
-    command: sh -c "npm install && npm run start:dev browser-worker"
+    command: sh -c "npm install && xvfb-run -a -s '-screen 0 1920x1080x24' npm run start:dev browser-worker"
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672
       - NODE_ENV=development

@@ -6,7 +6,7 @@ import { UpdateAuctionDto } from './dto/update-auction.dto';
 
 @Injectable()
 export class AuctionsService {
-  constructor(private prismaService: PrismaService) {}
+  constructor(private prismaService: PrismaService) { }
 
   async create(createAuctionDto: CreateAuctionDto) {
     const { users, sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
@@ -46,8 +46,8 @@ export class AuctionsService {
 
   async findAll(groupId: string, user?: { id: string; role: Roles }) {
     if (!user?.id) return [];
-
-    if (user?.role === Roles.SuperAdmin) {
+    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+    if (isAdmin) {
       return this.prismaService.auction.findMany({
         where: { auctionGroupId: groupId },
         include: {
@@ -79,8 +79,8 @@ export class AuctionsService {
     if (!user?.id) {
       throw new ForbiddenException('Потрібна авторизація');
     }
-
-    if (user?.role === Roles.Admin) {
+    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+    if (isAdmin) {
       const auction = await this.prismaService.auction.findUnique({
         where: { id },
         include: {
@@ -216,38 +216,38 @@ export class AuctionsService {
   }) {
     const { user, query, auctionGroupId } = params;
 
-    const isAdmin = user?.role === Roles.Admin;
+    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
 
     return this.prismaService.auction.findMany({
       where: {
         AND: [
           query
             ? {
-                OR: [
-                  {
-                    title: {
-                      contains: query,
-                      mode: 'insensitive',
-                    },
+              OR: [
+                {
+                  title: {
+                    contains: query,
+                    mode: 'insensitive',
                   },
-                  {
-                    url: {
-                      contains: query,
-                      mode: 'insensitive',
-                    },
+                },
+                {
+                  url: {
+                    contains: query,
+                    mode: 'insensitive',
                   },
-                ],
-              }
+                },
+              ],
+            }
             : {},
 
           auctionGroupId ? { auctionGroupId } : {},
 
           !isAdmin
             ? {
-                users: {
-                  some: { id: user?.id },
-                },
-              }
+              users: {
+                some: { id: user?.id },
+              },
+            }
             : {},
         ],
       },

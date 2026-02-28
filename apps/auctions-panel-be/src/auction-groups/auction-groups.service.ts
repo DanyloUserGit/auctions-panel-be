@@ -7,7 +7,7 @@ import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
 
 @Injectable()
 export class AuctionGroupsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(createAuctionGroupDto: CreateAuctionGroupDto) {
     const { auctions, ...rest } = createAuctionGroupDto;
@@ -31,7 +31,9 @@ export class AuctionGroupsService {
   async findAll(user?: { id: string; role: Roles }) {
     if (!user?.id) return [];
 
-    if (user?.role === Roles.SuperAdmin) {
+    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+
+    if (isAdmin) {
       return this.prisma.auctionGroup.findMany({
         include: {
           auctions: true
@@ -70,7 +72,9 @@ export class AuctionGroupsService {
       throw new ForbiddenException('Потрібна авторизація');
     }
 
-    if (user?.role === Roles.Admin) {
+    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+
+    if (isAdmin) {
       const auction = await this.prisma.auctionGroup.findUnique({
         where: { id },
         include: {
@@ -152,30 +156,30 @@ export class AuctionGroupsService {
   }
   async search(params: { user?: { id: string; role: Roles }; query?: string }) {
     const { user, query } = params;
-    const isAdmin = user?.role === Roles.Admin;
+    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
 
     return this.prisma.auctionGroup.findMany({
       where: {
         AND: [
           query
             ? {
-                title: {
-                  contains: query,
-                  mode: 'insensitive',
-                },
-              }
+              title: {
+                contains: query,
+                mode: 'insensitive',
+              },
+            }
             : {},
 
           !isAdmin
             ? {
-                auctions: {
-                  some: {
-                    users: {
-                      some: { id: user?.id },
-                    },
+              auctions: {
+                some: {
+                  users: {
+                    some: { id: user?.id },
                   },
                 },
-              }
+              },
+            }
             : {},
         ],
       },
@@ -183,12 +187,12 @@ export class AuctionGroupsService {
         auctions: isAdmin
           ? true
           : {
-              where: {
-                users: {
-                  some: { id: user?.id },
-                },
+            where: {
+              users: {
+                some: { id: user?.id },
               },
             },
+          },
       },
       orderBy: { title: 'asc' },
     });

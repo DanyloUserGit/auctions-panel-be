@@ -1,7 +1,7 @@
 // apps/browser-worker/src/browser/browser.service.ts
 import { Injectable, Logger } from '@nestjs/common';
-import { chromium, BrowserContext, Page } from 'playwright';
 import * as path from 'path';
+import { chromium, Page } from 'playwright';
 
 @Injectable()
 export class BrowserService {
@@ -45,9 +45,10 @@ export class BrowserService {
 
     const page = await context.newPage();
     this.activePages.set(sessionId, page);
+    const targetOrigin = new URL(url).origin;
 
     // 2. Обмеження: Блокування роутів (AllowedRoutes)
-    await this.applyRouteRestrictions(page, allowedRoutes);
+    await this.applyRouteRestrictions(page, allowedRoutes, targetOrigin);
 
     // 3. Автологін (Сценарій)
     await this.performAutoLogin(page, url, authData);
@@ -58,26 +59,22 @@ export class BrowserService {
     return page;
   }
 
-  private async applyRouteRestrictions(page: Page, allowedRoutes: string[]) {
+  private async applyRouteRestrictions(page: Page, allowedRoutes: string[], targetOrigin: string) {
+    // 4. Захист: Блокуємо переходи на заборонені домени
     await page.route('**/*', (route) => {
-      const request = route.request();
-      const requestUrl = request.url();
-      const resourceType = request.resourceType();
+      const requestUrl = route.request().url();
 
-      // Дозволяємо завантажувати статику (картинки, стилі, скрипти) звідусіль, 
-      // щоб сайт не "зламався" візуально
-      if (['stylesheet', 'image', 'font', 'script'].includes(resourceType)) {
-        return route.continue();
-      }
+      // ДОДАЄМО ПЕРЕВІРКУ: чи починається запит з базового домену цільового сайту
+      const isTargetDomain = requestUrl.startsWith(targetOrigin);
+      const isExplicitlyAllowed = allowedRoutes.some(allowed => requestUrl.startsWith(allowed));
 
-      // Перевіряємо, чи входить базовий URL у список дозволених
-      const isAllowed = allowedRoutes.some(allowedUrl => requestUrl.startsWith(allowedUrl));
+      const isAllowed = isTargetDomain || isExplicitlyAllowed;
 
-      if (isAllowed || requestUrl === 'about:blank') {
+      if (isAllowed || requestUrl.includes('.js') || requestUrl.includes('.css') || requestUrl.includes('.png') || requestUrl.includes('.jpg')) {
         route.continue();
       } else {
         this.logger.warn(`Блокування переходу: ${requestUrl}`);
-        route.abort('accessdenied');
+        route.abort('accessdenied'); // Саме це і викликало ERR_ACCESS_DENIED
       }
     });
   }
