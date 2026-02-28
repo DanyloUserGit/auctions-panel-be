@@ -13,7 +13,7 @@ import { SessionsService } from './sessions.service';
 import { Inject } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 
-@WebSocketGateway({ cors: { origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org'] } }) 
+@WebSocketGateway({ cors: { origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org'] } })
 export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
@@ -36,11 +36,11 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     @SubscribeMessage('join_auction')
     async handleJoinAuction(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { userId: string; auctionId: string; width:number; height:number }
+        @MessageBody() data: { userId: string; auctionId: string; auctionAuthId: string; width: number; height: number }
     ) {
         try {
             // Валідація і створення сесії через наш сервіс
-            const session = await this.sessionService.initializeSession(data.userId, data.auctionId, data.width, data.height);
+            const session = await this.sessionService.initializeSession(data.userId, data.auctionId, data.auctionAuthId, data.width, data.height);
 
             // Додаємо клієнта в "кімнату" (room) сокетів, названу ID сесії
             client.join(session.id);
@@ -48,6 +48,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
             // Повідомляємо React, що сесію ініціалізовано, можна починати WebRTC процес
             client.emit('session_ready', { sessionId: session.id });
         } catch (error) {
+            console.error('❌ Помилка в Gateway (join_auction):', error.message); // ДОДАЙ ЦЕ
             client.emit('error', { message: error.message });
         }
     }
@@ -56,13 +57,15 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     @SubscribeMessage('webrtc_signal')
     handleWebRtcSignal(
         @ConnectedSocket() client: Socket,
-        @MessageBody() payload: { sessionId: string; signalData: any } // signalData: SDP або ICE
+        @MessageBody() payload: { sessionId: string; signalData: any }
     ) {
-        // Відправляємо сигнал через RabbitMQ до конкретного Worker-а
+        // ДОДАНО .subscribe() !!!
         this.rabbitClient.emit('webrtc_signal_to_worker', {
             sessionId: payload.sessionId,
             clientId: client.id,
             signalData: payload.signalData
+        }).subscribe({
+            error: (err) => console.error('❌ Помилка передачі WebRTC сигналу:', err)
         });
     }
 }

@@ -12,7 +12,7 @@ import { SessionGateway } from './session.gateway';
         name: 'WORKER_SERVICE',
         transport: Transport.RMQ,
         options: {
-          urls: ['amqp://localhost:5672'],
+          urls: [process.env.RABBITMQ_URL || 'amqp://127.0.0.1:5672'],
           queue: 'browser_sessions_queue',
           queueOptions: {
             durable: true,
