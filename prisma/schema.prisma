@@ -59,7 +59,7 @@ model AuctionAuth {
   password String
 
   auctionId String  @db.Uuid
-  auction   Auction @relation(fields: [auctionId], references: [id])
+  auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   sessions Session[]
 

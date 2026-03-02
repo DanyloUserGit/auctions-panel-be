@@ -102,7 +102,7 @@ export class UsersService {
       this.prisma.user.findMany({
         where,
         skip,
-        take: limit,
+        take: Number(limit),
         select: {
           id: true,
           email: true,
