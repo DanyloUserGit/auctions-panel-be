@@ -3,10 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Roles, User } from '@prisma/client';
 import { EditProfileDto } from './dto/EditProfileDto.dto';
 import { ChangeRoleDto } from './dto/ChangeRoleDto.dto';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class ProfileService {
-    constructor(private prismaService: PrismaService) { }
+    constructor(private prismaService: PrismaService, private mailService: MailService) { }
     async editProfile(user: User, body: EditProfileDto) {
         try {
             const isAdmin = user.role === Roles.SuperAdmin;
@@ -54,7 +55,7 @@ export class ProfileService {
         await this.prismaService.resetToken.deleteMany({ where: { userId: user.id } });
 
         const expiry = new Date();
-        expiry.setHours(expiry.getMinutes() + 2);
+        expiry.setHours(expiry.getMinutes() + 5);
 
         const tokenRecord = await this.prismaService.resetToken.create({
             data: {
@@ -65,7 +66,7 @@ export class ProfileService {
 
         const resetLink = `${process.env.HOST || "http://localhost:8000"}/reset-password/${tokenRecord.id}`;
 
-        console.log(`Link sent to ${user.email}: ${resetLink}`);
+        await this.mailService.send(user.email, `Ваше посилання на зміну пароля: ${resetLink}`, "Зміна паролю")
 
         return { status: "ok", message: 'Посилання для скидання надіслано' };
     }
