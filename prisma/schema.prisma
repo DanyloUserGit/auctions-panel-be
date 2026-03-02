@@ -38,6 +38,7 @@ model User {
   auctions      Auction[]      @relation("UserAuctions")
   session       Session?       @relation(fields: [sessionId], references: [id])
   sessionId     String?        @db.Uuid()
+  resetTokens   ResetToken[]
 
   @@map("users")
 }
@@ -136,4 +137,12 @@ model Worker {
   port     Int
   isActive Boolean
   sessions Session[]
+}
+
+model ResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }
