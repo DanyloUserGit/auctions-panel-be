@@ -73,13 +73,14 @@ export class BrowserService {
     const safeWidth = Math.min(viewport.width, 1920);
     const safeHeight = Math.min(viewport.height, 1080);
     const args = [
-      '--display=:99',
+      // '--display=:99',
       `--window-size=${safeWidth},${safeHeight}`,
       '--window-position=0,0',
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-infobars',
+      '--disable-gpu',
       '--ignore-certificate-errors',
     ];
     // if (process.env.NODE_ENV === 'production') {
