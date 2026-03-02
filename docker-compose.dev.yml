@@ -8,17 +8,21 @@ services:
       - "15672:15672"
 
   browser-worker:
+    network_mode: "host"
     build:
       context: .
       dockerfile: Dockerfile.worker
+    ports:
+      - "10000-10050:10000-10050/udp"
     volumes:
       - .:/app
-      - /app/node_modules 
-    command: sh -c "npm install && xvfb-run -a -s '-screen 0 1920x1080x24' npm run start:dev browser-worker"
+      - /app/node_modules
+    command: sh -c "rm -f /tmp/.X99-lock && npm install && xvfb-run --server-num=99 -s '-screen 0 1920x1080x24' npm run start:dev browser-worker"
     environment:
-      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - RABBITMQ_URL=amqp://localhost:5672
       - NODE_ENV=development
       - DISPLAY=:99
+      - WEBRTC_ANNOUNCED_IP=127.0.0.1
     env_file:
       - .env
     depends_on:

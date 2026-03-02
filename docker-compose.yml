@@ -43,5 +43,7 @@ services:
       - .env
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672
+    ports:
+      - "10000-10050:10000-10050/udp"
 volumes:
   postgres_data:
