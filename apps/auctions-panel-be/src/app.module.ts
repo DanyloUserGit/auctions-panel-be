@@ -11,9 +11,13 @@ import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { UsersModule } from './users/users.module';
+import { ScheduleModule } from '@nestjs/schedule'
+import { MailModule } from './mail/mail.module';
+import { ProfileModule } from './profile/profile.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
     }),
@@ -34,6 +38,8 @@ import { UsersModule } from './users/users.module';
     AuctionGroupsModule,
     AuctionAuthModule,
     SessionsModule,
+    MailModule,
+    ProfileModule
   ],
   providers: [
     {
@@ -42,4 +48,4 @@ import { UsersModule } from './users/users.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
