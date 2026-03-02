@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Roles } from '@prisma/client';
+import { Prisma, Roles } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
@@ -123,42 +123,48 @@ export class AuctionsService {
   async update(id: string, updateAuctionDto: UpdateAuctionDto) {
     const { users, sessions, auctionAuths, auctionGroupId, ...rest } = updateAuctionDto;
 
-    return await this.prismaService.auction.update({
-      where: { id },
-      data: {
-        ...rest,
+    try {
+      return await this.prismaService.auction.update({
+        where: { id },
+        data: {
+          ...rest,
 
-        ...(auctionGroupId !== undefined && {
-          auctionGroup: auctionGroupId ? { connect: { id: auctionGroupId } } : { disconnect: true },
-        }),
+          ...(auctionGroupId !== undefined && {
+            auctionGroup: auctionGroupId ? { connect: { id: auctionGroupId } } : { disconnect: true },
+          }),
 
-        ...(users && {
-          users: {
-            set: users.map((id) => ({ id })),
-          },
-        }),
+          ...(users && {
+            users: {
+              set: users.map((id) => ({ id })),
+            },
+          }),
 
-        ...(sessions && {
-          sessions: {
-            set: sessions.map((id) => ({ id })),
-          },
-        }),
+          ...(sessions && {
+            sessions: {
+              set: sessions.map((id) => ({ id })),
+            },
+          }),
 
-        ...(auctionAuths && {
-          auctionAuths: {
-            set: auctionAuths.map((id) => ({ id })),
-          },
-        }),
-      },
-      include: {
-        users: true,
-        sessions: true,
-        auctionAuths: true,
-        auctionGroup: true,
-      },
-    });
+          ...(auctionAuths && {
+            auctionAuths: {
+              set: auctionAuths.map((id) => ({ id })),
+            },
+          }),
+        },
+        include: {
+          users: true,
+          sessions: true,
+          auctionAuths: true,
+          auctionGroup: true,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new NotFoundException(`Auction with ID ${id} not found.`);
+      }
+      throw error;
+    }
   }
-
   async remove(id: string) {
     return await this.prismaService.auction.delete({
       where: { id },

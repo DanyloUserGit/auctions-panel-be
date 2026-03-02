@@ -1,12 +1,62 @@
 // apps/browser-worker/src/browser/browser.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
-import { chromium, Page } from 'playwright';
+import { Browser, BrowserContext, chromium, Page } from 'playwright';
+
+interface ActiveSession {
+  browser: Browser;
+  context: BrowserContext;
+  page: Page;
+}
 
 @Injectable()
 export class BrowserService {
   private readonly logger = new Logger(BrowserService.name);
   private activePages = new Map<string, Page>();
+  private sessions = new Map<string, ActiveSession>();
+
+  async stopSession(sessionId: string): Promise<void> {
+    this.logger.log(`[BrowserService] Починаємо процес зупинки сесії: ${sessionId}`);
+
+    // 1. Знаходимо сесію в пам'яті
+    const session = this.sessions.get(sessionId);
+
+    if (!session) {
+      this.logger.warn(`[BrowserService] Сесію ${sessionId} не знайдено. Можливо, вона вже закрита або впала раніше.`);
+      return;
+    }
+
+    const { browser, context, page } = session;
+
+    try {
+      // 2. Закриваємо об'єкти по черзі, починаючи з найменшого (щоб уникнути помилок TargetClosed)
+
+      // Перевіряємо, чи сторінка ще не закрита крашем
+      if (!page.isClosed()) {
+        await page.close();
+      }
+
+      // Закриваємо контекст (це очистить кеш, куки для цієї сесії)
+      await context.close();
+
+      // Закриваємо сам процес браузера
+      await browser.close();
+
+      this.logger.log(`[BrowserService] Playwright інстанси для ${sessionId} успішно закриті.`);
+
+    } catch (error) {
+      this.logger.error(`[BrowserService] Помилка під час закриття процесів Playwright для ${sessionId}:`, error);
+      // Кидаємо помилку далі, щоб контролер міг зробити channel.nack()
+      throw error;
+    } finally {
+      // 3. НАЙВАЖЛИВІШЕ: Видаляємо об'єкт з Map у блоці finally.
+      // Навіть якщо сталася помилка при закритті (наприклад, сторінка зависла),
+      // ми повинні видалити посилання з пам'яті Node.js (Garbage Collection),
+      // інакше отримаємо витік пам'яті (Memory Leak).
+      this.sessions.delete(sessionId);
+      this.logger.log(`[BrowserService] Сесію ${sessionId} видалено з реєстру активних сесій.`);
+    }
+  }
 
   async launchSession(
     sessionId: string,
@@ -19,11 +69,12 @@ export class BrowserService {
     // 1. Ізоляція: Створюємо унікальну директорію для сесії (збереження куків, кешу)
     const userDataDir = path.join('/tmp/playwright_sessions', sessionId);
 
-    this.logger.log(`Запуск Playwright для сесії ${sessionId}`);
-
+    this.logger.log(`Запуск Playwright для сесії ${sessionId}, ${viewport}`);
+    const safeWidth = Math.min(viewport.width, 1920);
+    const safeHeight = Math.min(viewport.height, 1080);
     const args = [
-      // '--display=:99',
-      `--window-size=${viewport.width},${viewport.height}`,
+      '--display=:99',
+      `--window-size=${safeWidth},${safeHeight}`,
       '--window-position=0,0',
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -31,9 +82,9 @@ export class BrowserService {
       '--disable-infobars',
       '--ignore-certificate-errors',
     ];
-    if (process.env.NODE_ENV === 'production') {
-      args.push('--display=:99');
-    }
+    // if (process.env.NODE_ENV === 'production') {
+    //   args.push('--display=:99');
+    // }
 
     // Запускаємо persistentContext з прив'язкою до віртуального дисплея Xvfb (:99)
     const context = await chromium.launchPersistentContext(userDataDir, {

@@ -4,6 +4,7 @@ import { SessionsController } from './sessions.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SessionsService } from './sessions.service';
 import { SessionGateway } from './session.gateway';
+import { SessionsApiController } from './sessions-api.controller';
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { SessionGateway } from './session.gateway';
     ]),
     PrismaModule,
   ],
-  controllers: [SessionsController],
+  controllers: [SessionsController, SessionsApiController],
   providers: [SessionsService, SessionGateway],
 })
 export class SessionsModule {}
