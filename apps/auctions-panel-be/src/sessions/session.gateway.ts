@@ -36,11 +36,11 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     @SubscribeMessage('join_auction')
     async handleJoinAuction(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { userId: string; auctionId: string; auctionAuthId: string; width: number; height: number }
+        @MessageBody() data: { userId: string; auctionId: string; auctionAuthId: string; width: number; height: number; sessionId?: string }
     ) {
         try {
             // Валідація і створення сесії через наш сервіс
-            const session = await this.sessionService.initializeSession(data.userId, data.auctionId, data.auctionAuthId, data.width, data.height);
+            const session = await this.sessionService.initializeSession(data.userId, data.auctionId, data.auctionAuthId, data.width, data.height, data.sessionId);
 
             // Додаємо клієнта в "кімнату" (room) сокетів, названу ID сесії
             client.join(session.id);
@@ -57,13 +57,15 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     @SubscribeMessage('webrtc_signal')
     handleWebRtcSignal(
         @ConnectedSocket() client: Socket,
-        @MessageBody() payload: { sessionId: string; signalData: any }
+        @MessageBody() payload: { sessionId: string; signalData: any, width: number; height: number }
     ) {
         // ДОДАНО .subscribe() !!!
         this.rabbitClient.emit('webrtc_signal_to_worker', {
             sessionId: payload.sessionId,
             clientId: client.id,
-            signalData: payload.signalData
+            signalData: payload.signalData,
+            width:payload.width,
+            height:payload.height
         }).subscribe({
             error: (err) => console.error('❌ Помилка передачі WebRTC сигналу:', err)
         });
