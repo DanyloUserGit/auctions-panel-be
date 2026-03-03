@@ -11,7 +11,7 @@ export class MailService {
             to: recipient,
             from: process.env.SENDGRID_CLIENT_ID!,
             subject,
-            content: [{ type: 'text/plain', value: body }],
+            content: [{ type: 'text/html', value: body }],
         };
         await this.sendGridClient.send(mail);
     }

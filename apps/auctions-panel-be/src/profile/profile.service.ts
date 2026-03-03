@@ -1,9 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import { Roles, User } from '@prisma/client';
-import { EditProfileDto } from './dto/EditProfileDto.dto';
-import { ChangeRoleDto } from './dto/ChangeRoleDto.dto';
 import { MailService } from '../mail/mail.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { hashPassword } from '../utils/password';
+import { ChangePasswordDto } from './dto/ChangePasswordDto.dto';
+import { ChangeRoleDto } from './dto/ChangeRoleDto.dto';
+import { EditProfileDto } from './dto/EditProfileDto.dto';
 
 @Injectable()
 export class ProfileService {
@@ -55,7 +57,7 @@ export class ProfileService {
         await this.prismaService.resetToken.deleteMany({ where: { userId: user.id } });
 
         const expiry = new Date();
-        expiry.setHours(expiry.getMinutes() + 5);
+        expiry.setMinutes(expiry.getMinutes() + 2);
 
         const tokenRecord = await this.prismaService.resetToken.create({
             data: {
@@ -66,7 +68,7 @@ export class ProfileService {
 
         const resetLink = `${process.env.HOST || "http://localhost:8000"}/reset-password/${tokenRecord.id}`;
 
-        await this.mailService.send(user.email, `Ваше посилання на зміну пароля: ${resetLink}`, "Зміна паролю")
+        await this.mailService.send(user.email, `<p>Ваше посилання на зміну пароля: <a href="${resetLink}">${resetLink}</a></p>`, "Зміна паролю")
 
         return { status: "ok", message: 'Посилання для скидання надіслано' };
     }
@@ -75,5 +77,30 @@ export class ProfileService {
         return await this.prismaService.resetToken.deleteMany({
             where: { expiresAt: { lt: new Date() } },
         });
+    }
+
+    async changePassword(user: User, dto: ChangePasswordDto, tokenId: string) {
+        const resetToken = await this.prismaService.resetToken.findUnique({
+            where: { id: tokenId },
+            include: { user: true }
+        });
+        if (!resetToken || resetToken.userId !== user.id) {
+            throw new ForbiddenException('Недійсний токен або доступ заборонено');
+        }
+        if (new Date() > resetToken.expiresAt) {
+            await this.prismaService.resetToken.delete({ where: { id: tokenId } });
+            throw new BadRequestException('Термін дії посилання вичерпано');
+        }
+        const hashedPassword = await hashPassword(dto.password);
+        await this.prismaService.$transaction([
+            this.prismaService.user.update({
+                where: { id: user.id },
+                data: { password: hashedPassword },
+            }),
+            this.prismaService.resetToken.delete({
+                where: { id: tokenId },
+            }),
+        ]);
+        return { status: 'ok', message: 'Пароль успішно змінено' };
     }
 }
