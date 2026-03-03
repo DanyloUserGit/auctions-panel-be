@@ -4,10 +4,11 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 
 @Injectable()
 export class TokenCleanupService {
-  constructor(private profileService: ProfileService) {}
+  constructor(private profileService: ProfileService) { }
 
-  @Cron(CronExpression.EVERY_5_MINUTES) 
+  @Cron('*/2 * * * *')
   async handleCleanup() {
+    console.log('Cleaning up expired tokens...');
     const result = await this.profileService.cleanExpiredTokens();
   }
 }
