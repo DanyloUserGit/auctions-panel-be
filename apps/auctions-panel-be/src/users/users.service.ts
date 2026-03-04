@@ -8,13 +8,14 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(createUserDto: CreateUserDto, currentUser: User) {
     const hashedPassword = await hashPassword(createUserDto.password);
 
     let targetGroupId = createUserDto.auctionGroupId;
-    if (currentUser.role !== 'SuperAdmin') {
+
+    if (currentUser.role !== Roles.SuperAdmin) {
       if (currentUser.auctionGroupId) {
         targetGroupId = currentUser.auctionGroupId;
       }
@@ -24,8 +25,7 @@ export class UsersService {
       data: {
         ...createUserDto,
         password: hashedPassword,
-        auctionGroupId: targetGroupId,
-        rights: 'Read',
+        auctionGroupId: targetGroupId || null,
       },
     });
   }
@@ -74,11 +74,11 @@ export class UsersService {
         lastActivity: user.lastActivity,
         currentSession: user.session
           ? {
-              id: user.session.id,
-              auction: user.session.auction.title,
-              createdAt: user.session.createdAt,
-              expiresAt: user.session.expiresAt,
-            }
+            id: user.session.id,
+            auction: user.session.auction.title,
+            createdAt: user.session.createdAt,
+            expiresAt: user.session.expiresAt,
+          }
           : null,
       },
       limits: {
@@ -154,7 +154,7 @@ export class UsersService {
     });
   }
   async searchUsers(dto: SearchUserDto, currentUser: User) {
-    const { query, page = 1, limit = 10 , role} = dto;
+    const { query, page = 1, limit = 10, role } = dto;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {
@@ -162,16 +162,16 @@ export class UsersService {
         currentUser.role !== 'SuperAdmin' ? { auctionGroupId: currentUser.auctionGroupId } : {},
         query
           ? {
-              OR: [
-                { firstName: { contains: query, mode: 'insensitive' } },
-                { lastName: { contains: query, mode: 'insensitive' } },
-                { email: { contains: query, mode: 'insensitive' } },
-              ],
-            }
+            OR: [
+              { firstName: { contains: query, mode: 'insensitive' } },
+              { lastName: { contains: query, mode: 'insensitive' } },
+              { email: { contains: query, mode: 'insensitive' } },
+            ],
+          }
           : {},
-          role ? {
-            role: role as Roles
-          } : {}
+        role ? {
+          role: role as Roles
+        } : {}
       ],
     };
 

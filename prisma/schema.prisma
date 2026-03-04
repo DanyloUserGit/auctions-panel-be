@@ -25,32 +25,94 @@ enum SessionRights {
   All
 }
 
+enum NotificationChannel {
+  InApp
+  Email
+  Telegram
+  Viber
+}
+
 model User {
-  id        String  @id @default(uuid()) @db.Uuid()
-  firstName String
-  lastName  String
-  email     String  @unique
-  password  String
-  phone     String? 
-  city      String? 
-  role          Roles         @default(User)
-  rights        Rights        @default(Read)
-  sessionRights SessionRights @default(Read)
-  isActive     Boolean @default(true)
-  isBlocked    Boolean @default(false)
-  sessionLimit Int     @default(1)
-  lastLogin    DateTime?
-  lastActivity DateTime?
-  refreshTokens RefreshToken[]
-  auctions      Auction[]      @relation("UserAuctions")
-  session       Session?       @relation(fields: [sessionId], references: [id])
-  sessionId     String?        @db.Uuid()
-  resetTokens   ResetToken[]
-  auctionGroup   AuctionGroup? @relation("GroupParticipants", fields: [auctionGroupId], references: [id])
-  auctionGroupId String?       @db.Uuid()
-  managedGroup AuctionGroup? @relation("GroupAdministrator")
+  id                       String                    @id @default(uuid()) @db.Uuid()
+  firstName                String
+  lastName                 String
+  email                    String                    @unique
+  password                 String
+  phone                    String?
+  city                     String?
+  role                     Roles                     @default(User)
+  rights                   Rights                    @default(Read)
+  sessionRights            SessionRights             @default(Read)
+  isActive                 Boolean                   @default(true)
+  isBlocked                Boolean                   @default(false)
+  sessionLimit             Int                       @default(1)
+  lastLogin                DateTime?
+  lastActivity             DateTime?
+  refreshTokens            RefreshToken[]
+  auctions                 Auction[]                 @relation("UserAuctions")
+  session                  Session?                  @relation(fields: [sessionId], references: [id])
+  sessionId                String?                   @db.Uuid()
+  resetTokens              ResetToken[]
+  auctionGroup             AuctionGroup?             @relation("GroupParticipants", fields: [auctionGroupId], references: [id])
+  auctionGroupId           String?                   @db.Uuid()
+  managedGroup             AuctionGroup?             @relation("GroupAdministrator")
+  userNotificationSettings UserNotificationSetting[]
+  notifications            Notification[]
 
   @@map("users")
+}
+
+model NotificationType {
+  id          String  @id @default(uuid()) @db.Uuid()
+  name        String  @unique
+  description String?
+
+  userSettings UserNotificationSetting[]
+
+  groupRequirements GroupNotificationRequirement[]
+
+  @@map("notification_types")
+}
+
+model UserNotificationSetting {
+  id                 String           @id @default(uuid()) @db.Uuid()
+  userId             String           @db.Uuid()
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationTypeId String           @db.Uuid()
+  notificationType   NotificationType @relation(fields: [notificationTypeId], references: [id])
+
+  isEnabled Boolean               @default(true)
+  channels  NotificationChannel[] @default([InApp])
+
+  @@unique([userId, notificationTypeId])
+  @@map("user_notification_settings")
+}
+
+model GroupNotificationRequirement {
+  id                 String           @id @default(uuid()) @db.Uuid()
+  groupId            String           @db.Uuid()
+  group              AuctionGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  notificationTypeId String           @db.Uuid()
+  notificationType   NotificationType @relation(fields: [notificationTypeId], references: [id])
+
+  isMandatory Boolean @default(false)
+
+  @@unique([groupId, notificationTypeId])
+  @@map("group_notification_requirements")
+}
+
+model Notification {
+  id     String @id @default(uuid()) @db.Uuid()
+  userId String @db.Uuid()
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type    String
+  message String  @db.Text
+  isRead  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
 }
 
 model RefreshToken {
@@ -122,8 +184,9 @@ model AuctionGroup {
 
   users User[] @relation("GroupParticipants")
 
-  groupAdminId String @unique @db.Uuid()
-  groupAdmin   User   @relation("GroupAdministrator", fields: [groupAdminId], references: [id])
+  groupAdminId                  String?                        @unique @db.Uuid()
+  groupAdmin                    User?                          @relation("GroupAdministrator", fields: [groupAdminId], references: [id])
+  groupNotificationRequirements GroupNotificationRequirement[]
 
   @@map("auction_groups")
 }
