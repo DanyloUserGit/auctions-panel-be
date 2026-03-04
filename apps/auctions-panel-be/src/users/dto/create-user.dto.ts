@@ -45,7 +45,7 @@ export class CreateUserSwaggerDto {
   @ApiProperty({ enum: ['Read', 'Write', 'All'] })
   rights: 'Read' | 'Write' | 'All';
 
-  @ApiProperty({ example: 'uuid-string', required: false })
+  @ApiProperty({ example: 'uuid-string', required: false, nullable:true })
   auctionGroupId?: string;
 
   @ApiProperty({ example: 1, default: 1 })
