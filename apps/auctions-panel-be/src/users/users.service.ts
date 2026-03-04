@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, User } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { SearchUserDto } from './dto/search-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -8,13 +8,95 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto, currentUser: User) {
     const hashedPassword = await hashPassword(createUserDto.password);
-    return await this.prisma.user.create({ data: { ...createUserDto, password: hashedPassword } });
+
+    let targetGroupId = createUserDto.auctionGroupId;
+    if (currentUser.role !== 'SuperAdmin') {
+      if (currentUser.auctionGroupId) {
+        targetGroupId = currentUser.auctionGroupId;
+      }
+    }
+
+    return await this.prisma.user.create({
+      data: {
+        ...createUserDto,
+        password: hashedPassword,
+        auctionGroupId: targetGroupId,
+        rights: 'Read'
+      }
+    });
   }
 
+  async getUserControlCard(id: string, currentUser: User) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: {
+        auctionGroup: true,
+        session: {
+          include: { auction: true }
+        },
+        refreshTokens: {
+          take: 1,
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!user) {
+      throw new NotFoundException(`Користувач не знайдений`);
+    }
+
+    if (currentUser.role === 'Admin' && user.auctionGroupId !== currentUser.auctionGroupId) {
+      throw new ForbiddenException('У вас немає доступу до цього користувача');
+    }
+
+    return {
+      profile: {
+        id: user.id,
+        fullName: `${user.firstName} ${user.lastName}`,
+        email: user.email,
+        phone: user.phone,
+        city: user.city,
+        role: user.role,
+        group: user.auctionGroup?.title || 'Без групи',
+      },
+      status: {
+        isActive: user.isActive,
+        isBlocked: user.isBlocked,
+        rights: user.rights,
+        sessionRights: user.sessionRights,
+      },
+      activity: {
+        lastLogin: user.lastLogin, 
+        lastActivity: user.lastActivity, 
+        currentSession: user.session ? {
+          id: user.session.id,
+          auction: user.session.auction.title,
+          createdAt: user.session.createdAt,
+          expiresAt: user.session.expiresAt
+        } : null,
+      },
+      limits: {
+        sessionLimit: user.sessionLimit,
+      },
+      recentEvents: await this.prisma.refreshToken.findMany({
+        where: { userId: id },
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true, id: true } 
+      })
+    };
+  }
+
+  async updateUserStatus(id: string, statusData: { isBlocked?: boolean, isActive?: boolean }) {
+    return await this.prisma.user.update({
+      where: { id },
+      data: statusData
+    });
+  }
   async findAll() {
     return await this.prisma.user.findMany();
   }
@@ -69,59 +151,37 @@ export class UsersService {
       where: { id },
     });
   }
-  async searchUsers(dto: SearchUserDto) {
+  async searchUsers(dto: SearchUserDto, currentUser: User) {
     const { query, page = 1, limit = 10 } = dto;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.UserWhereInput = query
-      ? {
+    const where: Prisma.UserWhereInput = {
+      AND: [
+        currentUser.role !== 'SuperAdmin'
+          ? { auctionGroupId: currentUser.auctionGroupId }
+          : {},
+        query ? {
           OR: [
-            {
-              firstName: {
-                contains: query,
-                mode: Prisma.QueryMode.insensitive,
-              },
-            },
-            {
-              lastName: {
-                contains: query,
-                mode: Prisma.QueryMode.insensitive,
-              },
-            },
-            {
-              email: {
-                contains: query,
-                mode: Prisma.QueryMode.insensitive,
-              },
-            },
-          ],
-        }
-      : {};
+            { firstName: { contains: query, mode: 'insensitive' } },
+            { lastName: { contains: query, mode: 'insensitive' } },
+            { email: { contains: query, mode: 'insensitive' } },
+          ]
+        } : {}
+      ]
+    };
 
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip,
         take: Number(limit),
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-          role: true,
-          rights: true,
-        },
+        include: {
+          session: true,
+        }
       }),
       this.prisma.user.count({ where }),
     ]);
 
-    return {
-      data: users,
-      meta: {
-        total,
-        page,
-        lastPage: Math.ceil(total / limit),
-      },
-    };
+    return { data: users, meta: { total, page, lastPage: Math.ceil(total / limit) } };
   }
 }

@@ -6,40 +6,48 @@ export const CreateUserSchema = z.object({
   lastName: z.string().min(2, { message: 'Прізвище має бути стрічкою, 2 символи та більше.' }),
   email: z.string().email({ message: 'Неправильний тип пошти.' }),
   password: z.string().min(8, { message: 'Пароль має містити мінімум 8 символів.' }),
+  phone: z.string().optional(), // ТЗ 15.2
+  city: z.string().optional(),  // ТЗ 15.2
   role: z.enum(['SuperAdmin', 'Admin', 'User'], {
     message: 'Потрібно обрати 1 з наступних ролей: SuperAdmin, Admin, User.',
   }),
   rights: z.enum(['Read', 'Write', 'All'], {
-    message: 'Потрібно обрати права зі списку: Read, Write, ReadAndWrite, Buy, Sell, BuyAndSell.',
+    message: 'Потрібно обрати права зі списку: Read, Write, All.',
   }),
+  auctionGroupId: z.string().uuid().optional(), // Для SA при створенні (ТЗ 15.2)
+  sessionLimit: z.number().int().min(1).default(1), // ТЗ 15.3
 });
 
 export type CreateUserDto = z.infer<typeof CreateUserSchema>;
 
 export class CreateUserSwaggerDto {
-  @ApiProperty({ example: 'John', description: "Ім'я користувача" })
+  @ApiProperty({ example: 'John' })
   firstName: string;
 
-  @ApiProperty({ example: 'Doe', description: 'Прізвище користувача' })
+  @ApiProperty({ example: 'Doe' })
   lastName: string;
 
-  @ApiProperty({ example: 'john.doe@example.com', description: 'Email користувача' })
+  @ApiProperty({ example: 'john.doe@example.com' })
   email: string;
 
-  @ApiProperty({ example: 'strongPassword123', description: 'Пароль користувача' })
+  @ApiProperty({ example: 'password123' })
   password: string;
 
-  @ApiProperty({
-    example: 'User',
-    enum: ['SuperAdmin', 'Admin', 'User'],
-    description: 'Роль користувача',
-  })
+  @ApiProperty({ example: '+380990000000', required: false })
+  phone?: string;
+
+  @ApiProperty({ example: 'Kyiv', required: false })
+  city?: string;
+
+  @ApiProperty({ enum: ['SuperAdmin', 'Admin', 'User'] })
   role: 'SuperAdmin' | 'Admin' | 'User';
 
-  @ApiProperty({
-    example: 'Read',
-    enum: ['Read', 'Write', 'ReadAndWrite', 'Buy', 'Sell', 'BuyAndSell'],
-    description: 'Права користувача',
-  })
-  rights: 'Read' | 'Write' | 'ReadAndWrite' | 'Buy' | 'Sell' | 'BuyAndSell';
+  @ApiProperty({ enum: ['Read', 'Write', 'All'] })
+  rights: 'Read' | 'Write' | 'All';
+
+  @ApiProperty({ example: 'uuid-string', required: false })
+  auctionGroupId?: string;
+
+  @ApiProperty({ example: 1, default: 1 })
+  sessionLimit: number;
 }

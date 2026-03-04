@@ -53,11 +53,4 @@ export class ProfileController {
         return this.profileService.sendResetLink(req.user);
     }
 
-    @Post("send")
-    @Public()
-    send(@Body() body: { email: string, html: string }) {
-        console.log(process.env.SENDGRID_API_KEY)
-        return this.mailService.send(body.email, body.html, "Test")
-    }
-
 }

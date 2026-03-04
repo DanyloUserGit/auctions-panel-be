@@ -26,19 +26,29 @@ enum SessionRights {
 }
 
 model User {
-  id            String         @id @default(uuid()) @db.Uuid()
-  firstName     String
-  lastName      String
-  email         String         @unique
-  password      String
-  role          Roles          @default(User)
-  rights        Rights         @default(Read)
-  sessionRights SessionRights  @default(Read)
+  id        String  @id @default(uuid()) @db.Uuid()
+  firstName String
+  lastName  String
+  email     String  @unique
+  password  String
+  phone     String? 
+  city      String? 
+  role          Roles         @default(User)
+  rights        Rights        @default(Read)
+  sessionRights SessionRights @default(Read)
+  isActive     Boolean @default(true)
+  isBlocked    Boolean @default(false)
+  sessionLimit Int     @default(1)
+  lastLogin    DateTime?
+  lastActivity DateTime?
   refreshTokens RefreshToken[]
   auctions      Auction[]      @relation("UserAuctions")
   session       Session?       @relation(fields: [sessionId], references: [id])
   sessionId     String?        @db.Uuid()
   resetTokens   ResetToken[]
+  auctionGroup   AuctionGroup? @relation("GroupParticipants", fields: [auctionGroupId], references: [id])
+  auctionGroupId String?       @db.Uuid()
+  managedGroup AuctionGroup? @relation("GroupAdministrator")
 
   @@map("users")
 }
@@ -109,6 +119,11 @@ model AuctionGroup {
   id       String    @id @default(uuid()) @db.Uuid()
   title    String
   auctions Auction[]
+
+  users User[] @relation("GroupParticipants")
+
+  groupAdminId String @unique @db.Uuid()
+  groupAdmin   User   @relation("GroupAdministrator", fields: [groupAdminId], references: [id])
 
   @@map("auction_groups")
 }
