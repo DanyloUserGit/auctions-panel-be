@@ -10,15 +10,19 @@ import { PrismaService } from '../prisma/prisma.service';
 export class UsersService {
   constructor(private prisma: PrismaService) { }
 
-  async create(createUserDto: CreateUserDto, currentUser: User) {
+  async create(createUserDto: CreateUserDto, currentUser?: User) {
     const hashedPassword = await hashPassword(createUserDto.password);
 
-    let targetGroupId = createUserDto.auctionGroupId;
+    let targetGroupId:string | undefined | null = createUserDto.auctionGroupId;
 
-    if (currentUser.role !== Roles.SuperAdmin) {
-      if (currentUser.auctionGroupId) {
-        targetGroupId = currentUser.auctionGroupId;
+    if (currentUser) {
+      if (currentUser.role !== Roles.SuperAdmin) {
+        if (currentUser.auctionGroupId) {
+          targetGroupId = currentUser.auctionGroupId;
+        }
       }
+    } else {
+      targetGroupId = null;
     }
 
     return await this.prisma.user.create({

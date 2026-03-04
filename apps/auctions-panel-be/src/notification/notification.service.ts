@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { MailService } from '../mail/mail.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { NotificationGateway } from './notification.gateway';
 
 
 @Injectable()
@@ -8,6 +9,7 @@ export class NotificationService {
     constructor(
         private prisma: PrismaService,
         private mailService: MailService,
+        private readonly gateway: NotificationGateway
     ) { }
 
     async getUserSettings(userId: string) {
@@ -58,14 +60,20 @@ export class NotificationService {
         const isMandatory = groupRequirement?.isMandatory || false;
 
         if (setting.isEnabled || isMandatory) {
-
             if (setting.channels.includes('InApp')) {
-                await this.prisma.notification.create({
+                const newNotif = await this.prisma.notification.create({
                     data: {
                         userId,
                         type: typeName,
                         message: content.body,
                     },
+                });
+
+                this.gateway.sendToUser(userId, {
+                    id: newNotif.id,
+                    type: typeName,
+                    message: content.body,
+                    createdAt: newNotif.createdAt
                 });
             }
 
@@ -77,7 +85,7 @@ export class NotificationService {
 
     async updateSettings(userId: string, typeId: string, updateDto: { isEnabled?: boolean; channels?: any[] }) {
         const user = await this.prisma.user.findUnique({ where: { id: userId } });
-        if(!user) throw new UnauthorizedException("Користувача не знайдено");
+        if (!user) throw new UnauthorizedException("Користувача не знайдено");
 
         if (updateDto.isEnabled === false && user.auctionGroupId) {
             const mandatory = await this.prisma.groupNotificationRequirement.findFirst({

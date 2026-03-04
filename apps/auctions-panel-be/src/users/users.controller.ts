@@ -16,7 +16,7 @@ import { Public } from '../decorators/public.decorator';
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) { }
 
   @Get('search')
   @ApiOperation({ summary: 'Search users with pagination' })
@@ -47,7 +47,11 @@ export class UsersController {
   @Public()
   create(@Body() createUserDto: CreateUserDto, @Req() req) {
     const data = CreateUserSchema.parse(createUserDto);
-    return this.usersService.create(data, req.user);
+    if (req.user) {
+      return this.usersService.create(data, req.user);
+    } else {
+      return this.usersService.create(data);
+    }
   }
 
   @Get()
