@@ -93,7 +93,7 @@ export class UsersController {
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Зміна статусу/блокування користувача' })
-  async updateStatus(@Param('id') id: string, @Body() statusDto: { isBlocked: boolean }) {
+  async updateStatus(@Param('id') id: string, @Body() statusDto: { isBlocked: boolean, isActive: boolean }) {
     return this.usersService.updateUserStatus(id, statusDto);
   }
 
