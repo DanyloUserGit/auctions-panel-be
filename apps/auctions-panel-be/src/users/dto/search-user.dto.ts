@@ -12,6 +12,10 @@ export class SearchUserDto {
   @IsString()
   query?: string;
 
+  @IsOptional()
+  @IsString()
+  role?: string;
+
   @ApiPropertyOptional({
     description: 'Page number',
     example: 1,
