@@ -7,7 +7,7 @@ export const CreateUserSchema = z.object({
   email: z.string().email({ message: 'Неправильний тип пошти.' }),
   password: z.string().min(8, { message: 'Пароль має містити мінімум 8 символів.' }),
   phone: z.string().optional(), // ТЗ 15.2
-  city: z.string().optional(),  // ТЗ 15.2
+  city: z.string().optional(), // ТЗ 15.2
   role: z.enum(['SuperAdmin', 'Admin', 'User'], {
     message: 'Потрібно обрати 1 з наступних ролей: SuperAdmin, Admin, User.',
   }),

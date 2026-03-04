@@ -4,6 +4,6 @@ import { SendGridClient } from './sendgrid-client';
 
 @Module({
   exports: [MailService],
-  providers: [MailService, SendGridClient]
+  providers: [MailService, SendGridClient],
 })
-export class MailModule { }
+export class MailModule {}

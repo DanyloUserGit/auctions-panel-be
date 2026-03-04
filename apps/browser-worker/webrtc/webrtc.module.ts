@@ -4,6 +4,6 @@ import { WebrtcService } from './webrtc.service';
 
 @Module({
   imports: [BrowserWorkerModule],
-  providers: [WebrtcService]
+  providers: [WebrtcService],
 })
-export class WebrtcModule { }
+export class WebrtcModule {}

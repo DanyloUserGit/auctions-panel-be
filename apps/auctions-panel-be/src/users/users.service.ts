@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   async create(createUserDto: CreateUserDto, currentUser: User) {
     const hashedPassword = await hashPassword(createUserDto.password);
@@ -25,8 +25,8 @@ export class UsersService {
         ...createUserDto,
         password: hashedPassword,
         auctionGroupId: targetGroupId,
-        rights: 'Read'
-      }
+        rights: 'Read',
+      },
     });
   }
 
@@ -36,13 +36,13 @@ export class UsersService {
       include: {
         auctionGroup: true,
         session: {
-          include: { auction: true }
+          include: { auction: true },
         },
         refreshTokens: {
           take: 1,
-          orderBy: { createdAt: 'desc' }
-        }
-      }
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
 
     if (!user) {
@@ -70,14 +70,16 @@ export class UsersService {
         sessionRights: user.sessionRights,
       },
       activity: {
-        lastLogin: user.lastLogin, 
-        lastActivity: user.lastActivity, 
-        currentSession: user.session ? {
-          id: user.session.id,
-          auction: user.session.auction.title,
-          createdAt: user.session.createdAt,
-          expiresAt: user.session.expiresAt
-        } : null,
+        lastLogin: user.lastLogin,
+        lastActivity: user.lastActivity,
+        currentSession: user.session
+          ? {
+              id: user.session.id,
+              auction: user.session.auction.title,
+              createdAt: user.session.createdAt,
+              expiresAt: user.session.expiresAt,
+            }
+          : null,
       },
       limits: {
         sessionLimit: user.sessionLimit,
@@ -86,15 +88,15 @@ export class UsersService {
         where: { userId: id },
         take: 10,
         orderBy: { createdAt: 'desc' },
-        select: { createdAt: true, id: true } 
-      })
+        select: { createdAt: true, id: true },
+      }),
     };
   }
 
-  async updateUserStatus(id: string, statusData: { isBlocked?: boolean, isActive?: boolean }) {
+  async updateUserStatus(id: string, statusData: { isBlocked?: boolean; isActive?: boolean }) {
     return await this.prisma.user.update({
       where: { id },
-      data: statusData
+      data: statusData,
     });
   }
   async findAll() {
@@ -157,17 +159,17 @@ export class UsersService {
 
     const where: Prisma.UserWhereInput = {
       AND: [
-        currentUser.role !== 'SuperAdmin'
-          ? { auctionGroupId: currentUser.auctionGroupId }
+        currentUser.role !== 'SuperAdmin' ? { auctionGroupId: currentUser.auctionGroupId } : {},
+        query
+          ? {
+              OR: [
+                { firstName: { contains: query, mode: 'insensitive' } },
+                { lastName: { contains: query, mode: 'insensitive' } },
+                { email: { contains: query, mode: 'insensitive' } },
+              ],
+            }
           : {},
-        query ? {
-          OR: [
-            { firstName: { contains: query, mode: 'insensitive' } },
-            { lastName: { contains: query, mode: 'insensitive' } },
-            { email: { contains: query, mode: 'insensitive' } },
-          ]
-        } : {}
-      ]
+      ],
     };
 
     const [users, total] = await Promise.all([
@@ -177,7 +179,7 @@ export class UsersService {
         take: Number(limit),
         include: {
           session: true,
-        }
+        },
       }),
       this.prisma.user.count({ where }),
     ]);

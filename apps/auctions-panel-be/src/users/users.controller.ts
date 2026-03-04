@@ -16,7 +16,7 @@ import { Public } from '../decorators/public.decorator';
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) { }
+  constructor(private readonly usersService: UsersService) {}
 
   @Get('search')
   @ApiOperation({ summary: 'Search users with pagination' })

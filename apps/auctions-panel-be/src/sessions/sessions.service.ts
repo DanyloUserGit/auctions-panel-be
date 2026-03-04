@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { Roles, SessionRights } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,8 +14,8 @@ import { decryptData } from '../utils/encrypt';
 export class SessionsService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
-    @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy,
-  ) { }
+    @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy
+  ) {}
 
   async onModuleInit() {
     console.log('⏳ Примусове підключення до RabbitMQ з API...');
@@ -36,7 +42,7 @@ export class SessionsService implements OnModuleInit {
   async finishSession(sessionId: string, userId: string) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
-      include: { auction: true, account: true }
+      include: { auction: true, account: true },
     });
 
     if (!session) {
@@ -55,14 +61,14 @@ export class SessionsService implements OnModuleInit {
       return session;
     }
 
-    this.rabbitClient.emit('stop_browser_session', {
-      sessionId: session.id,
-    }).subscribe({
-      next: () =>
-        console.log(`Сесія ${session.id} завершена у worker`),
-      error: err =>
-        console.error('RabbitMQ stop error:', err),
-    });
+    this.rabbitClient
+      .emit('stop_browser_session', {
+        sessionId: session.id,
+      })
+      .subscribe({
+        next: () => console.log(`Сесія ${session.id} завершена у worker`),
+        error: (err) => console.error('RabbitMQ stop error:', err),
+      });
 
     await this.prisma.session.delete({
       where: { id: session.id },
@@ -70,10 +76,17 @@ export class SessionsService implements OnModuleInit {
     return { deleted: true };
   }
 
-  async initializeSession(userId: string, auctionId: string, auctionAuthId: string, width: number, height: number, existingSessionId?: string) {
+  async initializeSession(
+    userId: string,
+    auctionId: string,
+    auctionAuthId: string,
+    width: number,
+    height: number,
+    existingSessionId?: string
+  ) {
     if (existingSessionId) {
       const session = await this.prisma.session.findUnique({
-        where: { id: existingSessionId }
+        where: { id: existingSessionId },
       });
 
       if (!session) {
@@ -93,30 +106,38 @@ export class SessionsService implements OnModuleInit {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new ForbiddenException('Користувача не знайдено');
     const isAdmin = user.role === Roles.SuperAdmin || user.role === Roles.Admin;
-    const allowedRights = [SessionRights.Buy, SessionRights.Sell, SessionRights.Read, SessionRights.All];
+    const allowedRights = [
+      SessionRights.Buy,
+      SessionRights.Sell,
+      SessionRights.Read,
+      SessionRights.All,
+    ];
     if (isAdmin && !allowedRights.includes(user.sessionRights)) {
       throw new ForbiddenException('У вас немає прав для участі в аукціонах');
     }
 
     const auction = await this.prisma.auction.findFirst({
       where: {
-        AND: [{ id: auctionId }, !isAdmin
-          ? {
-            users: {
-              some: { id: user?.id },
-            },
-          }
-          : {},]
+        AND: [
+          { id: auctionId },
+          !isAdmin
+            ? {
+                users: {
+                  some: { id: user?.id },
+                },
+              }
+            : {},
+        ],
       },
       include: { auctionAuths: true },
     });
-    console.log(auction, isAdmin)
+    console.log(auction, isAdmin);
     if (!auction || auction.auctionAuths.length === 0) {
       throw new BadRequestException('Аукціон не знайдено або відсутні дані для входу');
     }
 
     const authData = auctionAuthId
-      ? auction.auctionAuths.find(a => a.id === auctionAuthId)
+      ? auction.auctionAuths.find((a) => a.id === auctionAuthId)
       : auction.auctionAuths[0];
 
     if (!authData) throw new ForbiddenException('Не знайдено облікових даних для цього аукціону');
@@ -137,13 +158,13 @@ export class SessionsService implements OnModuleInit {
       session = await this.prisma.session.create({
         data: {
           auction: {
-            connect: { id: auctionId }
+            connect: { id: auctionId },
           },
           account: {
-            connect: { id: authData.id }
+            connect: { id: authData.id },
           },
           users: {
-            connect: { id: userId }
+            connect: { id: userId },
           },
           maxConnections: 5,
           activeConnections: 1,
@@ -152,17 +173,20 @@ export class SessionsService implements OnModuleInit {
         },
       });
 
-      this.rabbitClient.emit('start_browser_session', {
-        sessionId: session.id,
-        auctionUrl: auction.url,
-        width,
-        height,
-        authEmail: authData.email,
-        authPassword: decryptData(authData.password),
-      }).subscribe({
-        next: () => console.log(`✅ Завдання (сесія: ${session?.id}) успішно відправлено в RabbitMQ!`),
-        error: (err) => console.error('❌ Помилка відправки завдання в RabbitMQ:', err)
-      });
+      this.rabbitClient
+        .emit('start_browser_session', {
+          sessionId: session.id,
+          auctionUrl: auction.url,
+          width,
+          height,
+          authEmail: authData.email,
+          authPassword: decryptData(authData.password),
+        })
+        .subscribe({
+          next: () =>
+            console.log(`✅ Завдання (сесія: ${session?.id}) успішно відправлено в RabbitMQ!`),
+          error: (err) => console.error('❌ Помилка відправки завдання в RabbitMQ:', err),
+        });
     }
 
     return session;
