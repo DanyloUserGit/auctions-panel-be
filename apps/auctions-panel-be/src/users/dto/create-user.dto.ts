@@ -6,16 +6,16 @@ export const CreateUserSchema = z.object({
   lastName: z.string().min(2, { message: 'Прізвище має бути стрічкою, 2 символи та більше.' }),
   email: z.string().email({ message: 'Неправильний тип пошти.' }),
   password: z.string().min(8, { message: 'Пароль має містити мінімум 8 символів.' }),
-  phone: z.string().optional(), // ТЗ 15.2
-  city: z.string().optional(), // ТЗ 15.2
+  phone: z.string().optional(),
+  city: z.string().optional(), 
   role: z.enum(['SuperAdmin', 'Admin', 'User'], {
     message: 'Потрібно обрати 1 з наступних ролей: SuperAdmin, Admin, User.',
   }),
   rights: z.enum(['Read', 'Write', 'All'], {
     message: 'Потрібно обрати права зі списку: Read, Write, All.',
   }),
-  auctionGroupId: z.string().uuid().optional(), // Для SA при створенні (ТЗ 15.2)
-  sessionLimit: z.number().int().min(1).default(1), // ТЗ 15.3
+  auctionGroupId: z.string().uuid().optional(),
+  sessionLimit: z.number().int().min(1).default(1), 
 });
 
 export type CreateUserDto = z.infer<typeof CreateUserSchema>;
