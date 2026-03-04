@@ -8,6 +8,6 @@ import { MailModule } from '../mail/mail.module';
 @Module({
   imports: [PrismaModule, MailModule],
   providers: [ProfileService, TokenCleanupService],
-  controllers: [ProfileController]
+  controllers: [ProfileController],
 })
-export class ProfileModule { }
+export class ProfileModule {}

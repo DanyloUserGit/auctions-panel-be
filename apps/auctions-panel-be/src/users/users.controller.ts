@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -24,8 +24,8 @@ export class UsersController {
     description: 'Users found successfully',
     type: SearchUserResponseDto,
   })
-  async search(@Query() dto: SearchUserDto): Promise<SearchUserResponseDto> {
-    return this.usersService.searchUsers(dto);
+  async search(@Query() dto: SearchUserDto, @Req() req): Promise<SearchUserResponseDto> {
+    return this.usersService.searchUsers(dto, req.user);
   }
 
   @Post()
@@ -45,9 +45,9 @@ export class UsersController {
     },
   })
   @Public()
-  create(@Body() createUserDto: CreateUserDto) {
+  create(@Body() createUserDto: CreateUserDto, @Req() req) {
     const data = CreateUserSchema.parse(createUserDto);
-    return this.usersService.create(data);
+    return this.usersService.create(data, req.user);
   }
 
   @Get()
@@ -79,6 +79,18 @@ export class UsersController {
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     const data = UpdateUserSchema.parse(updateUserDto);
     return this.usersService.update(id, data);
+  }
+
+  @Get(':id/control-card')
+  @ApiOperation({ summary: 'Отримати картку контролю користувача (ТЗ 15.3)' })
+  async getControlCard(@Param('id') id: string, @Req() req) {
+    return this.usersService.getUserControlCard(id, req.user);
+  }
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Зміна статусу/блокування користувача' })
+  async updateStatus(@Param('id') id: string, @Body() statusDto: { isBlocked: boolean }) {
+    return this.usersService.updateUserStatus(id, statusDto);
   }
 
   @Delete(':id')

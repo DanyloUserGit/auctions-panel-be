@@ -11,8 +11,8 @@ import { WebrtcService } from '../webrtc/webrtc.service';
         name: 'API_CLIENT',
         transport: Transport.RMQ,
         options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://rabbitmq:5672'], 
-          queue: 'api_responses_queue', 
+          urls: [process.env.RABBITMQ_URL || 'amqp://rabbitmq:5672'],
+          queue: 'api_responses_queue',
           queueOptions: {
             durable: false,
           },
@@ -23,4 +23,4 @@ import { WebrtcService } from '../webrtc/webrtc.service';
   controllers: [BrowserWorkerController],
   providers: [BrowserService, WebrtcService],
 })
-export class BrowserWorkerModule { }
+export class BrowserWorkerModule {}

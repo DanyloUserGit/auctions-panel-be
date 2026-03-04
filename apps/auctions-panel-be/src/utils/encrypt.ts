@@ -14,7 +14,7 @@ const getKey = () => {
 };
 
 export const encryptData = (text: string) => {
-  const key = getKey(); 
+  const key = getKey();
   const iv = randomBytes(16);
   const cipher = createCipheriv(algorithm, key, iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
@@ -26,7 +26,7 @@ export const decryptData = (encryptedData: string) => {
   const key = getKey();
   const [ivHex, encryptedText] = encryptedData.split(':');
   if (!ivHex || !encryptedText) throw new Error('Invalid encrypted data format');
-  
+
   const iv = Buffer.from(ivHex, 'hex');
   const decipher = createDecipheriv(algorithm, key, iv);
   let decrypted = decipher.update(encryptedText, 'hex', 'utf8');

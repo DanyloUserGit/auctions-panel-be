@@ -6,7 +6,7 @@ import { UpdateAuctionDto } from './dto/update-auction.dto';
 
 @Injectable()
 export class AuctionsService {
-  constructor(private prismaService: PrismaService) { }
+  constructor(private prismaService: PrismaService) {}
 
   async create(createAuctionDto: CreateAuctionDto) {
     const { users, sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
@@ -130,7 +130,9 @@ export class AuctionsService {
           ...rest,
 
           ...(auctionGroupId !== undefined && {
-            auctionGroup: auctionGroupId ? { connect: { id: auctionGroupId } } : { disconnect: true },
+            auctionGroup: auctionGroupId
+              ? { connect: { id: auctionGroupId } }
+              : { disconnect: true },
           }),
 
           ...(users && {
@@ -229,31 +231,31 @@ export class AuctionsService {
         AND: [
           query
             ? {
-              OR: [
-                {
-                  title: {
-                    contains: query,
-                    mode: 'insensitive',
+                OR: [
+                  {
+                    title: {
+                      contains: query,
+                      mode: 'insensitive',
+                    },
                   },
-                },
-                {
-                  url: {
-                    contains: query,
-                    mode: 'insensitive',
+                  {
+                    url: {
+                      contains: query,
+                      mode: 'insensitive',
+                    },
                   },
-                },
-              ],
-            }
+                ],
+              }
             : {},
 
           auctionGroupId ? { auctionGroupId } : {},
 
           !isAdmin
             ? {
-              users: {
-                some: { id: user?.id },
-              },
-            }
+                users: {
+                  some: { id: user?.id },
+                },
+              }
             : {},
         ],
       },
