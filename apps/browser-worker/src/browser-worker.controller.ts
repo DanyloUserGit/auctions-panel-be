@@ -4,14 +4,13 @@ import { ClientProxy, Ctx, EventPattern, Payload, RmqContext } from '@nestjs/mic
 import { BrowserService } from './browser-worker.service';
 import { WebrtcService } from '../webrtc/webrtc.service';
 
-
 @Controller()
 export class BrowserWorkerController {
   constructor(
     private readonly browserService: BrowserService,
     private readonly webrtcService: WebrtcService,
-    @Inject('API_CLIENT') private apiClient: ClientProxy,
-  ) { }
+    @Inject('API_CLIENT') private apiClient: ClientProxy
+  ) {}
 
   // 1. Команда на запуск сесії (приходить з Main API)
   @EventPattern('start_browser_session')
@@ -31,12 +30,14 @@ export class BrowserWorkerController {
         data.allowedRoutes || [],
         data.forbiddenSelectors || []
       );
-      console.log(data.sessionId,
+      console.log(
+        data.sessionId,
         data.auctionUrl,
         { width: data.width, height: data.height },
         { email: data.authEmail, password: data.authPassword },
         data.allowedRoutes || [],
-        data.forbiddenSelectors || [])
+        data.forbiddenSelectors || []
+      );
       console.log(`[Worker] Playwright успішно запущено для сесії: ${data.sessionId}`);
 
       // ПРАВИЛЬНО: Підтверджуємо RabbitMQ, що ми обробили саме його ПОВІДОМЛЕННЯ
@@ -76,7 +77,6 @@ export class BrowserWorkerController {
   @EventPattern('webrtc_signal_to_worker')
   async handleWebrtcSignal(@Payload() data: any) {
     if (data.signalData.type === 'offer') {
-
       // Передаємо колбек для ICE кандидатів
       const answer = await this.webrtcService.handleOffer(
         data.sessionId,
@@ -85,7 +85,7 @@ export class BrowserWorkerController {
         (candidate) => {
           this.apiClient.emit('webrtc_signal_to_client', {
             sessionId: data.sessionId,
-            signalData: { type: 'candidate', candidate }
+            signalData: { type: 'candidate', candidate },
           });
         }
       );
@@ -93,7 +93,7 @@ export class BrowserWorkerController {
       // ВІДПРАВЛЯЄМО ANSWER В API
       this.apiClient.emit('webrtc_signal_to_client', {
         sessionId: data.sessionId,
-        signalData: { type: 'answer', sdp: answer.sdp }
+        signalData: { type: 'answer', sdp: answer.sdp },
       });
     }
   }

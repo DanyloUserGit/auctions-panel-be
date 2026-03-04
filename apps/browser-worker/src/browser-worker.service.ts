@@ -22,7 +22,9 @@ export class BrowserService {
     const session = this.sessions.get(sessionId);
 
     if (!session) {
-      this.logger.warn(`[BrowserService] Сесію ${sessionId} не знайдено. Можливо, вона вже закрита або впала раніше.`);
+      this.logger.warn(
+        `[BrowserService] Сесію ${sessionId} не знайдено. Можливо, вона вже закрита або впала раніше.`
+      );
       return;
     }
 
@@ -43,9 +45,11 @@ export class BrowserService {
       await browser.close();
 
       this.logger.log(`[BrowserService] Playwright інстанси для ${sessionId} успішно закриті.`);
-
     } catch (error) {
-      this.logger.error(`[BrowserService] Помилка під час закриття процесів Playwright для ${sessionId}:`, error);
+      this.logger.error(
+        `[BrowserService] Помилка під час закриття процесів Playwright для ${sessionId}:`,
+        error
+      );
       // Кидаємо помилку далі, щоб контролер міг зробити channel.nack()
       throw error;
     } finally {
@@ -91,9 +95,8 @@ export class BrowserService {
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false, // Обов'язково false для Xvfb
       viewport,
-      args
+      args,
     });
-
 
     const page = await context.newPage();
     this.activePages.set(sessionId, page);
@@ -118,11 +121,17 @@ export class BrowserService {
 
       // ДОДАЄМО ПЕРЕВІРКУ: чи починається запит з базового домену цільового сайту
       const isTargetDomain = requestUrl.startsWith(targetOrigin);
-      const isExplicitlyAllowed = allowedRoutes.some(allowed => requestUrl.startsWith(allowed));
+      const isExplicitlyAllowed = allowedRoutes.some((allowed) => requestUrl.startsWith(allowed));
 
       const isAllowed = isTargetDomain || isExplicitlyAllowed;
 
-      if (isAllowed || requestUrl.includes('.js') || requestUrl.includes('.css') || requestUrl.includes('.png') || requestUrl.includes('.jpg')) {
+      if (
+        isAllowed ||
+        requestUrl.includes('.js') ||
+        requestUrl.includes('.css') ||
+        requestUrl.includes('.png') ||
+        requestUrl.includes('.jpg')
+      ) {
         route.continue();
       } else {
         this.logger.warn(`Блокування переходу: ${requestUrl}`);
@@ -155,15 +164,19 @@ export class BrowserService {
 
     // Також інжектуємо JS для блокування кліків (додатковий рівень захисту)
     await page.addInitScript((selectors) => {
-      document.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        const isForbidden = selectors.some(selector => target.closest(selector));
-        if (isForbidden) {
-          e.preventDefault();
-          e.stopPropagation();
-          console.log('Клік заблоковано системою безпеки.');
-        }
-      }, true); // Захоплюємо подію на фазі занурення
+      document.addEventListener(
+        'click',
+        (e) => {
+          const target = e.target as HTMLElement;
+          const isForbidden = selectors.some((selector) => target.closest(selector));
+          if (isForbidden) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Клік заблоковано системою безпеки.');
+          }
+        },
+        true
+      ); // Захоплюємо подію на фазі занурення
     }, forbiddenSelectors);
   }
 
@@ -171,10 +184,12 @@ export class BrowserService {
     this.logger.log(`Автологін на ${url}`);
     await page.goto(url, { waitUntil: 'networkidle' });
 
-    // ПРИКЛАД: Логіка заповнення форми. 
+    // ПРИКЛАД: Логіка заповнення форми.
     // У реальності тут може бути вставка cookies або виклик API для отримання токена
     try {
-      const emailInput = await page.$('input[type="email"], input[name="email"], input[name="username"]');
+      const emailInput = await page.$(
+        'input[type="email"], input[name="email"], input[name="username"]'
+      );
       const passInput = await page.$('input[type="password"], input[name="password"]');
 
       if (emailInput && passInput) {

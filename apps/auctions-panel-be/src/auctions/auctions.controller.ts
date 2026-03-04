@@ -16,7 +16,7 @@ export class AuctionsController {
 
   @Get('search')
   @ApiQuery({ name: 'auctionGroupId', required: false, type: String })
-  search(@Query('q') query: string, @Req() req,  @Query('auctionGroupId') auctionGroupId?: string) {
+  search(@Query('q') query: string, @Req() req, @Query('auctionGroupId') auctionGroupId?: string) {
     return this.auctionsService.search({
       user: req.user,
       query,
