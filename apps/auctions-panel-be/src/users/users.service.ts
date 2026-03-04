@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, User } from '@prisma/client';
+import { Prisma, Roles, User } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { SearchUserDto } from './dto/search-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -154,7 +154,7 @@ export class UsersService {
     });
   }
   async searchUsers(dto: SearchUserDto, currentUser: User) {
-    const { query, page = 1, limit = 10 } = dto;
+    const { query, page = 1, limit = 10 , role} = dto;
     const skip = (page - 1) * limit;
 
     const where: Prisma.UserWhereInput = {
@@ -169,6 +169,9 @@ export class UsersService {
               ],
             }
           : {},
+          role ? {
+            role: role as Roles
+          } : {}
       ],
     };
 
