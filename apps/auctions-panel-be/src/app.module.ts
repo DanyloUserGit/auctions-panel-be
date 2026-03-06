@@ -15,6 +15,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { MailModule } from './mail/mail.module';
 import { ProfileModule } from './profile/profile.module';
 import { NotificationModule } from './notification/notification.module';
+import { TrainingModule } from './training/training.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { NotificationModule } from './notification/notification.module';
     MailModule,
     ProfileModule,
     NotificationModule,
+    TrainingModule,
   ],
   providers: [
     {
