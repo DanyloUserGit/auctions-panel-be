@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Roles, User } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { SearchUserDto } from './dto/search-user.dto';
@@ -13,7 +13,7 @@ export class UsersService {
   async create(createUserDto: CreateUserDto, currentUser?: User) {
     const hashedPassword = await hashPassword(createUserDto.password);
 
-    let targetGroupId:string | undefined | null = createUserDto.auctionGroupId;
+    let targetGroupId: string | undefined | null = createUserDto.auctionGroupId;
 
     if (currentUser) {
       if (currentUser.role !== Roles.SuperAdmin) {
@@ -136,14 +136,29 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto) {
-    const exists = await this.prisma.user.findUnique({ where: { id } });
-    if (!exists) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+
+    if (!user) {
       throw new NotFoundException(`Користувач з id ${id} не знайдений`);
+    }
+
+    const updateData = { ...updateUserDto };
+
+    if (updateData.email === user.email) {
+      delete updateData.email;
+    } else if (updateData.email) {
+      const emailExists = await this.prisma.user.findUnique({
+        where: { email: updateData.email }
+      });
+
+      if (emailExists) {
+        throw new BadRequestException('Цей email вже використовується іншим користувачем');
+      }
     }
 
     return await this.prisma.user.update({
       where: { id },
-      data: updateUserDto,
+      data: updateData,
     });
   }
 
