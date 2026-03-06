@@ -1,14 +1,15 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Roles, User } from '@prisma/client';
+import { NotificationService } from '../notification/notification.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { hashPassword } from '../utils/password';
 import { CreateUserDto } from './dto/create-user.dto';
 import { SearchUserDto } from './dto/search-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { hashPassword } from '../utils/password';
-import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService, private readonly notificationService: NotificationService) { }
 
   async create(createUserDto: CreateUserDto, currentUser?: User) {
     const hashedPassword = await hashPassword(createUserDto.password);
@@ -24,14 +25,15 @@ export class UsersService {
     } else {
       targetGroupId = null;
     }
-
-    return await this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
         auctionGroupId: targetGroupId || null,
       },
     });
+    await this.notificationService.initializeDefaultSettings(user.id);
+    return user;
   }
 
   async getUserControlCard(id: string, currentUser: User) {

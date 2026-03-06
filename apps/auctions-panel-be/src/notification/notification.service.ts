@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { NotificationChannel } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationGateway } from './notification.gateway';
@@ -38,37 +39,25 @@ export class NotificationService {
 
     async notify(userId: string, typeName: string, content: { subject: string; body: string }) {
         const setting = await this.prisma.userNotificationSetting.findFirst({
-            where: {
-                userId,
-                notificationType: { name: typeName }
-            },
-            include: {
-                user: true,
-                notificationType: true
-            }
+            where: { userId, notificationType: { name: typeName } },
+            include: { user: true, notificationType: true }
         });
 
         if (!setting) return;
 
-        const groupRequirement = await this.prisma.groupNotificationRequirement.findFirst({
-            where: {
-                notificationTypeId: setting.notificationTypeId,
-                groupId: setting.user.auctionGroupId || undefined
-            }
-        });
+        const groupRequirement = setting.user.auctionGroupId
+            ? await this.prisma.groupNotificationRequirement.findFirst({
+                where: { notificationTypeId: setting.notificationTypeId, groupId: setting.user.auctionGroupId }
+            }) : null;
 
         const isMandatory = groupRequirement?.isMandatory || false;
 
         if (setting.isEnabled || isMandatory) {
-            if (setting.channels.includes('InApp')) {
+            // In-App
+            if (setting.channels.includes(NotificationChannel.InApp)) {
                 const newNotif = await this.prisma.notification.create({
-                    data: {
-                        userId,
-                        type: typeName,
-                        message: content.body,
-                    },
+                    data: { userId, type: typeName, message: content.body },
                 });
-
                 this.gateway.sendToUser(userId, {
                     id: newNotif.id,
                     type: typeName,
@@ -77,8 +66,21 @@ export class NotificationService {
                 });
             }
 
-            if (setting.channels.includes('Email') && setting.user.email) {
+            // Email
+            if (setting.channels.includes(NotificationChannel.Email) && setting.user.email) {
                 await this.mailService.send(setting.user.email, content.subject, content.body);
+            }
+
+            // Telegram
+            if (setting.channels.includes(NotificationChannel.Telegram) && setting.user.telegramChatId) {
+                // TODO: Розкоментувати після додавання TelegramService
+                // await this.telegramService.sendMessage(setting.user.telegramChatId, content.body);
+            }
+
+            // Viber
+            if (setting.channels.includes(NotificationChannel.Viber) && setting.user.viberId) {
+                // TODO: Розкоментувати після додавання ViberService
+                // await this.viberService.sendMessage(setting.user.viberId, content.body);
             }
         }
     }
@@ -100,5 +102,95 @@ export class NotificationService {
             where: { userId_notificationTypeId: { userId, notificationTypeId: typeId } },
             data: updateDto
         });
+    }
+    async getNotifications(userId: string, page: number = 1, limit: number = 20) {
+        const skip = (page - 1) * limit;
+        const [data, total] = await Promise.all([
+            this.prisma.notification.findMany({
+                where: { userId },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+            this.prisma.notification.count({ where: { userId } })
+        ]);
+
+        const unreadCount = await this.prisma.notification.count({
+            where: { userId, isRead: false }
+        });
+
+        return { data, total, page, limit, unreadCount };
+    }
+
+    async markAsRead(userId: string, notificationId: string) {
+        const notification = await this.prisma.notification.findUnique({ where: { id: notificationId } });
+
+        if (!notification || notification.userId !== userId) {
+            throw new ForbiddenException("Ви не можете змінити це сповіщення");
+        }
+
+        return this.prisma.notification.update({
+            where: { id: notificationId },
+            data: { isRead: true }
+        });
+    }
+
+    async initializeDefaultSettings(userId: string) {
+        const types = await this.prisma.notificationType.findMany();
+        const existingSettings = await this.prisma.userNotificationSetting.findMany({ where: { userId } });
+        const existingTypeIds = existingSettings.map(s => s.notificationTypeId);
+
+        const typesToCreate = types.filter(t => !existingTypeIds.includes(t.id));
+
+        if (typesToCreate.length > 0) {
+            await this.prisma.userNotificationSetting.createMany({
+                data: typesToCreate.map(t => ({
+                    userId,
+                    notificationTypeId: t.id,
+                    isEnabled: true,
+                    channels: [NotificationChannel.InApp]
+                }))
+            });
+        }
+        return { message: "Налаштування ініціалізовано" };
+    }
+
+    async setGroupMandatoryRequirement(adminUserId: string, groupId: string, typeId: string, isMandatory: boolean) {
+        const group = await this.prisma.auctionGroup.findUnique({ where: { id: groupId } });
+
+        if (!group || group.groupAdminId !== adminUserId) {
+            throw new ForbiddenException("Тільки адміністратор групи може змінювати ці налаштування");
+        }
+
+        return this.prisma.groupNotificationRequirement.upsert({
+            where: { groupId_notificationTypeId: { groupId, notificationTypeId: typeId } },
+            update: { isMandatory },
+            create: { groupId, notificationTypeId: typeId, isMandatory }
+        });
+    }
+    async seedNotificationTypes() {
+        const types = [
+            { name: 'SESSION_STARTED', description: 'Сповіщення про успішний запуск сесії для аукціону' },
+            { name: 'SESSION_EXPIRING', description: 'Попередження про те, що час активної сесії скоро закінчиться' },
+            { name: 'AUCTION_ENDED', description: 'Сповіщення про завершення аукціону' },
+            { name: 'ADDED_TO_GROUP', description: 'Сповіщення про додавання користувача до нової групи' },
+            { name: 'WORKER_ERROR', description: 'Критичні сповіщення про помилки в роботі воркерів' },
+        ];
+
+        let processedCount = 0;
+
+        for (const type of types) {
+            await this.prisma.notificationType.upsert({
+                where: { name: type.name },
+                update: { description: type.description },
+                create: { name: type.name, description: type.description },
+            });
+            processedCount++;
+        }
+
+        return {
+            success: true,
+            message: `Успішно додано або оновлено ${processedCount} типів сповіщень.`
+        };
     }
 }
