@@ -32,6 +32,11 @@ enum NotificationChannel {
   Viber
 }
 
+enum MaterialVisibility {
+  All
+  Group
+}
+
 model User {
   id                       String                    @id @default(uuid()) @db.Uuid()
   firstName                String
@@ -60,8 +65,42 @@ model User {
   managedGroup             AuctionGroup?             @relation("GroupAdministrator")
   userNotificationSettings UserNotificationSetting[]
   notifications            Notification[]
+  trainingMaterials        TrainingMaterial[]
 
   @@map("users")
+}
+
+model InformationPage {
+  id        String   @id @default(uuid()) @db.Uuid()
+  title     String
+  slug      String   @unique
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("information_pages")
+}
+
+model TrainingMaterial {
+  id          String  @id @default(uuid()) @db.Uuid()
+  title       String
+  content     String  @db.Text
+  imageUrl    String?
+  isPublished Boolean @default(false)
+
+  visibility   MaterialVisibility @default(All)
+  allowedRoles Roles[]
+
+  authorId String @db.Uuid()
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  groupId String?       @db.Uuid()
+  group   AuctionGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("training_materials")
 }
 
 model NotificationType {
@@ -192,6 +231,7 @@ model AuctionGroup {
   groupAdminId                  String?                        @unique @db.Uuid()
   groupAdmin                    User?                          @relation("GroupAdministrator", fields: [groupAdminId], references: [id])
   groupNotificationRequirements GroupNotificationRequirement[]
+  trainingMaterials             TrainingMaterial[]
 
   @@map("auction_groups")
 }
