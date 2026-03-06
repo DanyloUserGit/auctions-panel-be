@@ -40,6 +40,8 @@ model User {
   password                 String
   phone                    String?
   city                     String?
+  telegramChatId           String?
+  viberId                  String?
   role                     Roles                     @default(User)
   rights                   Rights                    @default(Read)
   sessionRights            SessionRights             @default(Read)
