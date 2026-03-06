@@ -154,10 +154,12 @@ model Session {
 
   users User[]
 
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  worker    Worker?  @relation(fields: [workerId], references: [id])
-  workerId  String?  @db.Uuid()
+  expiresAt      DateTime
+  createdAt      DateTime      @default(now())
+  worker         Worker?       @relation(fields: [workerId], references: [id])
+  workerId       String?       @db.Uuid()
+  auctionGroup   AuctionGroup? @relation(fields: [auctionGroupId], references: [id])
+  auctionGroupId String?       @db.Uuid()
 
   @@map("sessions")
 }
@@ -181,6 +183,7 @@ model AuctionGroup {
   id       String    @id @default(uuid()) @db.Uuid()
   title    String
   auctions Auction[]
+  sessions Session[]
 
   users User[] @relation("GroupParticipants")
 

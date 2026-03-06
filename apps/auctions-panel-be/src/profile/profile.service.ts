@@ -17,7 +17,7 @@ export class ProfileService {
   constructor(
     private prismaService: PrismaService,
     private mailService: MailService
-  ) {}
+  ) { }
   async editProfile(user: User, body: EditProfileDto) {
     try {
       const isAdmin = user.role === Roles.SuperAdmin;
@@ -28,6 +28,7 @@ export class ProfileService {
       if (!isAdmin || user.id !== body.id) {
         throw new ForbiddenException('Доступ заборонено');
       }
+
       return await this.prismaService.user.update({
         where: { id: body.id },
         data: {
@@ -35,6 +36,9 @@ export class ProfileService {
         },
       });
     } catch (error) {
+      if (error.code === 'P2002') {
+        throw new BadRequestException('Цей email вже використовується');
+      }
       throw new BadRequestException('Помилка при редагуванні профілю');
     }
   }
