@@ -39,6 +39,8 @@ services:
       dockerfile: Dockerfile.worker
     depends_on:
       - rabbitmq
+    restart: always
+    shm_size: '2gb'
     env_file:
       - .env
     environment:

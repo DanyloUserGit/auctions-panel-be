@@ -3,8 +3,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ChildProcess, spawn } from 'child_process';
 import * as dgram from 'dgram';
 import { MediaStreamTrack, RTCPeerConnection, RTCRtpCodecParameters } from 'werift';
-import { BrowserService } from '../src/browser-worker.service';
+
 import { RtpPacket } from 'werift';
+import { BrowserService } from '../browser-worker.service';
 
 @Injectable()
 export class WebrtcService {
@@ -15,7 +16,7 @@ export class WebrtcService {
 
   private udpSockets = new Map<string, dgram.Socket>();
 
-  constructor(private browserService: BrowserService) {}
+  constructor(private browserService: BrowserService) { }
 
   async handleOffer(
     sessionId: string,
@@ -45,6 +46,18 @@ export class WebrtcService {
 
     const videoTrack = new MediaStreamTrack({ kind: 'video', codec });
     pc.addTrack(videoTrack);
+
+    pc.ondatachannel = (channel) => {
+      channel.channel.onmessage = async (event) => {
+        try {
+          const action = JSON.parse(event.data as string);
+          // Викликаємо метод interact з твого browser.service
+          await this.browserService.interact(sessionId, action);
+        } catch (e) {
+          this.logger.error('Помилка обробки DataChannel повідомлення:', e);
+        }
+      };
+    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) onIceCandidate(event.candidate);
@@ -123,6 +136,7 @@ export class WebrtcService {
       '30',
       '-i',
       `${display}.0+0,0`,
+      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
       '-c:v',
       'libvpx',
       '-b:v',
