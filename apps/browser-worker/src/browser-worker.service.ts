@@ -77,7 +77,9 @@ export class BrowserService {
     const safeWidth = Math.min(viewport.width, 1920);
     const safeHeight = Math.min(viewport.height, 1080);
     const args = [
-      // '--display=:99',
+      '--kiosk',
+      '--hide-scrollbars',
+      '--disable-infobars',
       `--window-size=${safeWidth},${safeHeight}`,
       '--window-position=0,0',
       '--no-sandbox',
@@ -183,6 +185,20 @@ export class BrowserService {
   private async performAutoLogin(page: Page, url: string, authData: any) {
     this.logger.log(`Автологін на ${url}`);
     await page.goto(url, { waitUntil: 'networkidle' });
+    await page.keyboard.press('F11');
+
+    // 3. (Важливо!) Скролбари F11 не сховає, тому CSS-хак все ще потрібен:
+    await page.addStyleTag({
+      content: `
+    *::-webkit-scrollbar { 
+      display: none !important; 
+    }
+    body { 
+      -ms-overflow-style: none !important;
+      scrollbar-width: none !important;
+    }
+  `
+    });
 
     // ПРИКЛАД: Логіка заповнення форми.
     // У реальності тут може бути вставка cookies або виклик API для отримання токена
@@ -211,8 +227,8 @@ export class BrowserService {
     if (action.type === 'click') {
       await page.mouse.click(action.x, action.y);
     } else if (action.type === 'keydown') {
-      // Блокуємо F12 на рівні Worker-а про всяк випадок
       if (action.key === 'F12') return;
+      if (action.key === 'F11') return;
       await page.keyboard.press(action.key);
     }
   }

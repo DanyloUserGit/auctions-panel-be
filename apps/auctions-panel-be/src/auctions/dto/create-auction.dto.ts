@@ -8,12 +8,17 @@ export const CreateAuctionSchema = z.object({
   users: z.array(z.string().uuid({ message: 'UserId має бути валідним UUID.' })).optional(),
 
   sessions: z.array(z.string().uuid({ message: 'SessionId має бути валідним UUID.' })).optional(),
+  auctionGroupId: z
+    .string()
+    .uuid({ message: 'auctionGroupId має бути валідним UUID.' })
+    .or(z.literal('')) 
+    .transform((val) => (val === '' ? undefined : val)) 
+    .optional(),
 
   auctionAuths: z
     .array(z.string().uuid({ message: 'AuctionAuthId має бути валідним UUID.' }))
     .optional(),
 
-  auctionGroupId: z.string().uuid({ message: 'auctionGroupId має бути валідним UUID.' }).optional(),
 });
 
 export type CreateAuctionDto = z.infer<typeof CreateAuctionSchema>;

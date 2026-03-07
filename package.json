@@ -26,15 +26,6 @@
     "prisma:reset": "prisma migrate reset",
     "prisma:generate": "prisma generate"
   },
-  "lint-staged": {
-    "*.{js,cjs,mjs,ts}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md}": [
-      "prettier --write"
-    ]
-  },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
@@ -125,6 +116,15 @@
     "testEnvironment": "node",
     "roots": [
       "<rootDir>/apps/"
+    ]
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint",
+      "prettier --check"
+    ],
+    "*.{json,md,css,scss}": [
+      "prettier --write"
     ]
   }
 }

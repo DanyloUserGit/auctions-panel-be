@@ -2,7 +2,8 @@
 import { Controller, Inject } from '@nestjs/common';
 import { ClientProxy, Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
 import { BrowserService } from './browser-worker.service';
-import { WebrtcService } from '../webrtc/webrtc.service';
+import { WebrtcService } from './webrtc/webrtc.service';
+
 
 @Controller()
 export class BrowserWorkerController {
