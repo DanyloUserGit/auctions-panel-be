@@ -108,7 +108,7 @@ export class BrowserService {
       window.addEventListener('DOMContentLoaded', () => {
         const cursor = document.createElement('div');
         cursor.id = 'playwright-custom-cursor';
-        
+
         // Стилізуємо курсор (можете замінити на картинку мишки)
         Object.assign(cursor.style, {
           width: '12px',
@@ -124,7 +124,7 @@ export class BrowserService {
           transform: 'translate(-50%, -50%)', // Центруємо крапку
           transition: 'transform 0.05s linear' // Трохи згладжуємо рух
         });
-        
+
         document.body.appendChild(cursor);
 
         // Рухаємо наш елемент за реальними координатами миші Playwright
@@ -239,55 +239,57 @@ export class BrowserService {
     console.log("Autologin start")
     this.logger.log(`Автологін на ${url}`);
 
-    try {
-      // 1. Змінюємо очікування на 'domcontentloaded' - це часто працює краще для Angular
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+    // try {
+    //   // 1. Змінюємо очікування на 'domcontentloaded' - це часто працює краще для Angular
+    //   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-      // 2. ДІАГНОСТИКА: Чекаємо, поки кнопка Login з'явиться ВІЗУАЛЬНО.
-      // Якщо сторінка пуста, скрипт впаде ТУТ із зрозумілою помилкою, а не пізніше.
-      const loginTrigger = page.locator('[data-el="login"]');
-      this.logger.log('Чекаємо на повний рендер сторінки (появу кнопки Login)...');
-      await loginTrigger.waitFor({ state: 'visible', timeout: 15000 });
-      this.logger.log('Сторінка успішно відобразилась!');
+    //   // 2. ДІАГНОСТИКА: Чекаємо, поки кнопка Login з'явиться ВІЗУАЛЬНО.
+    //   // Якщо сторінка пуста, скрипт впаде ТУТ із зрозумілою помилкою, а не пізніше.
+    //   const loginTrigger = page.locator('[data-el="login"]');
+    //   this.logger.log('Чекаємо на повний рендер сторінки (появу кнопки Login)...');
+    //   await loginTrigger.waitFor({ state: 'visible', timeout: 15000 });
+    //   this.logger.log('Сторінка успішно відобразилась!');
 
-      // 3. Обробка банера Cookies
-      const acceptCookiesBtn = page.locator('#onetrust-accept-btn-handler');
-      try {
-        await acceptCookiesBtn.waitFor({ state: 'visible', timeout: 3000 });
-        await acceptCookiesBtn.click();
-        this.logger.log('Кукі прийнято.');
-      } catch (e) {
-        this.logger.log('Банер кукісів не знайдено, йдемо далі.');
-      }
+    //   // 3. Обробка банера Cookies
+    //   const acceptCookiesBtn = page.locator('#onetrust-accept-btn-handler');
+    //   try {
+    //     await acceptCookiesBtn.waitFor({ state: 'visible', timeout: 3000 });
+    //     await acceptCookiesBtn.click();
+    //     this.logger.log('Кукі прийнято.');
+    //   } catch (e) {
+    //     this.logger.log('Банер кукісів не знайдено, йдемо далі.');
+    //   }
 
-      // 4. Клікаємо на кнопку Login
-      await loginTrigger.click();
+    //   // 4. Клікаємо на кнопку Login
+    //   await loginTrigger.click();
 
-      // 5. Чекаємо появи поля вводу
-      const usernameInput = page.locator('#username');
-      await usernameInput.waitFor({ state: 'visible', timeout: 10000 });
+    //   // 5. Чекаємо появи поля вводу
+    //   const usernameInput = page.locator('#username');
+    //   await usernameInput.waitFor({ state: 'visible', timeout: 10000 });
 
-      // 6. Вводимо дані
-      await usernameInput.fill(authData.email);
-      await page.locator('#password').fill(authData.password);
+    //   // 6. Вводимо дані
+    //   await usernameInput.fill(authData.email);
+    //   await page.locator('#password').fill(authData.password);
 
-      // 7. Клікаємо Увійти
-      await page.locator('#loginButton').click();
+    //   // 7. Клікаємо Увійти
+    //   await page.locator('#loginButton').click();
 
-      this.logger.log('Дані введено, чекаємо на логін...');
-      await page.waitForLoadState('networkidle');
+    //   this.logger.log('Дані введено, чекаємо на логін...');
+    //   await page.screenshot({ path: 'debug-screen.png', fullPage: true });
+    //   this.logger.debug('📸 Скріншот збережено у debug-screen.png');
+    //   await page.waitForLoadState('networkidle');
 
-    } catch (e) {
-      this.logger.error('Помилка під час виконання автологіну:', e);
-      // ДУЖЕ КОРИСНО: Робимо скріншот у разі помилки, щоб побачити, що саме бачить Playwright
-      // (навіть якщо трансляція показує пустий екран)
-      try {
-        await page.screenshot({ path: `/tmp/error-login-${Date.now()}.png` });
-        this.logger.log('Скріншот помилки збережено у /tmp/');
-      } catch (screenshotError) {
-        this.logger.error('Не вдалося зробити скріншот', screenshotError);
-      }
-    }
+    // } catch (e) {
+    //   this.logger.error('Помилка під час виконання автологіну:', e);
+    //   // ДУЖЕ КОРИСНО: Робимо скріншот у разі помилки, щоб побачити, що саме бачить Playwright
+    //   // (навіть якщо трансляція показує пустий екран)
+    //   try {
+    //     await page.screenshot({ path: `/tmp/error-login-${Date.now()}.png` });
+    //     this.logger.log('Скріншот помилки збережено у /tmp/');
+    //   } catch (screenshotError) {
+    //     this.logger.error('Не вдалося зробити скріншот', screenshotError);
+    //   }
+    // }
   }
 
   // Метод для передачі кліків від користувача (через WebRTC DataChannel)
