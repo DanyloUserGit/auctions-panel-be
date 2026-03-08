@@ -10,7 +10,7 @@ export class AuctionGroupsService {
   constructor(private prisma: PrismaService) { }
 
   async create(createAuctionGroupDto: CreateAuctionGroupDto) {
-    const { auctions, groupAdmin, ...rest } = createAuctionGroupDto;
+    const { auctions, groupAdmin, users, ...rest } = createAuctionGroupDto;
 
     return await this.prisma.auctionGroup.create({
       data: {
@@ -18,6 +18,11 @@ export class AuctionGroupsService {
         groupAdmin: {
           connect: { id: groupAdmin },
         },
+        ...(users && {
+          users: {
+            connect: users.map((id) => ({ id })),
+          },
+        }),
         ...(auctions && {
           auctions: {
             connect: auctions.map((id) => ({ id })),
@@ -132,7 +137,7 @@ export class AuctionGroupsService {
   }
 
   async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto) {
-    const { auctions, groupAdmin, ...rest } = updateAuctionGroupDto;
+    const { auctions, groupAdmin, users, ...rest } = updateAuctionGroupDto;
 
     return await this.prisma.auctionGroup.update({
       where: { id },
@@ -141,6 +146,11 @@ export class AuctionGroupsService {
         groupAdmin: {
           connect: { id: groupAdmin },
         },
+        ...(users && {
+          users: {
+            connect: users.map((id) => ({ id })),
+          },
+        }),
         ...(auctions && {
           auctions: {
             set: auctions.map((id) => ({ id })),
