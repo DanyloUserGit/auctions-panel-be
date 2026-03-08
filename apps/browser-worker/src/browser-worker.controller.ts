@@ -11,7 +11,7 @@ export class BrowserWorkerController {
     private readonly browserService: BrowserService,
     private readonly webrtcService: WebrtcService,
     @Inject('API_CLIENT') private apiClient: ClientProxy
-  ) {}
+  ) { }
 
   // 1. Команда на запуск сесії (приходить з Main API)
   @EventPattern('start_browser_session')
@@ -41,7 +41,7 @@ export class BrowserWorkerController {
       );
       console.log(`[Worker] Playwright успішно запущено для сесії: ${data.sessionId}`);
 
-      // ПРАВИЛЬНО: Підтверджуємо RabbitMQ, що ми обробили саме його ПОВІДОМЛЕННЯ
+
       channel.ack(originalMsg);
     } catch (error) {
       console.error(`[Worker] Помилка під час запуску Playwright:`, error);
@@ -78,24 +78,29 @@ export class BrowserWorkerController {
   @EventPattern('webrtc_signal_to_worker')
   async handleWebrtcSignal(@Payload() data: any) {
     if (data.signalData.type === 'offer') {
-      // Передаємо колбек для ICE кандидатів
       const answer = await this.webrtcService.handleOffer(
         data.sessionId,
+        data.clientId, 
         data.signalData,
         { width: data.width, height: data.height },
         (candidate) => {
           this.apiClient.emit('webrtc_signal_to_client', {
             sessionId: data.sessionId,
+            clientId: data.clientId,
             signalData: { type: 'candidate', candidate },
           });
         }
       );
 
-      // ВІДПРАВЛЯЄМО ANSWER В API
       this.apiClient.emit('webrtc_signal_to_client', {
         sessionId: data.sessionId,
+        clientId: data.clientId, // ВАЖЛИВО
         signalData: { type: 'answer', sdp: answer.sdp },
       });
     }
+  }
+  @EventPattern('webrtc_client_disconnect')
+  async handleClientDisconnect(@Payload() data: { sessionId: string; clientId: string }) {
+    await this.webrtcService.closeClientConnection(data.sessionId, data.clientId);
   }
 }

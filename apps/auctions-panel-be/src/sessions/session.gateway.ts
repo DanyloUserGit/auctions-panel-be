@@ -24,7 +24,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
   constructor(
     private readonly sessionService: SessionsService,
     @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy
-  ) {}
+  ) { }
 
   handleConnection(client: Socket) {
     console.log(`Клієнт підключився: ${client.id}`);
@@ -32,7 +32,9 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
   handleDisconnect(client: Socket) {
     console.log(`Клієнт відключився: ${client.id}`);
-    // Тут в майбутньому треба зменшувати activeConnections у БД
+    if (client.data.sessionId) {
+      this.handleLeaveAuction(client);
+    }
   }
 
   // 1. Клієнт просить підключитися до аукціону
@@ -60,14 +62,28 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
         data.sessionId
       );
 
-      // Додаємо клієнта в "кімнату" (room) сокетів, названу ID сесії
-      client.join(session.id);
+      client.data.sessionId = session.id;
 
-      // Повідомляємо React, що сесію ініціалізовано, можна починати WebRTC процес
+      client.join(session.id);
       client.emit('session_ready', { sessionId: session.id });
     } catch (error) {
       console.error('❌ Помилка в Gateway (join_auction):', error.message); // ДОДАЙ ЦЕ
       client.emit('error', { message: error.message });
+    }
+  }
+
+  @SubscribeMessage('leave_auction')
+  async handleLeaveAuction(@ConnectedSocket() client: Socket) {
+    const sessionId = client.data.sessionId;
+    if (sessionId) {
+      client.leave(sessionId);
+      await this.sessionService.leaveSession(sessionId); // Зменшуємо лічильник
+      this.rabbitClient
+        .emit('webrtc_client_disconnect', { sessionId, clientId: client.id })
+        .subscribe({
+          error: (err) => console.error('Помилка відправки webrtc_client_disconnect:', err)
+        });
+      delete client.data.sessionId;
     }
   }
 

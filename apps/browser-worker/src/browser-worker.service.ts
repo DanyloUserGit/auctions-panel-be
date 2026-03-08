@@ -90,7 +90,7 @@ export class BrowserService {
       '--ignore-certificate-errors',
     ];
     // if (process.env.NODE_ENV === 'production') {
-    //   args.push('--display=:99');
+    //  args.push('--display=:99');
     // }
 
     // Запускаємо persistentContext з прив'язкою до віртуального дисплея Xvfb (:99)
@@ -102,10 +102,63 @@ export class BrowserService {
 
     const page = await context.newPage();
     this.activePages.set(sessionId, page);
+
+    await page.addInitScript(() => {
+      // Спрацьовує, коли DOM завантажився
+      window.addEventListener('DOMContentLoaded', () => {
+        const cursor = document.createElement('div');
+        cursor.id = 'playwright-custom-cursor';
+        
+        // Стилізуємо курсор (можете замінити на картинку мишки)
+        Object.assign(cursor.style, {
+          width: '12px',
+          height: '12px',
+          backgroundColor: 'rgba(255, 0, 0, 0.8)', // Червона крапка (щоб добре бачити)
+          border: '2px solid white',
+          borderRadius: '50%',
+          position: 'fixed',
+          top: '0',
+          left: '0',
+          pointerEvents: 'none', // ДУЖЕ ВАЖЛИВО! Щоб курсор не блокував кліки під собою
+          zIndex: '2147483647',  // Поверх усього
+          transform: 'translate(-50%, -50%)', // Центруємо крапку
+          transition: 'transform 0.05s linear' // Трохи згладжуємо рух
+        });
+        
+        document.body.appendChild(cursor);
+
+        // Рухаємо наш елемент за реальними координатами миші Playwright
+        document.addEventListener('mousemove', (e) => {
+          cursor.style.transform = `translate(calc(${e.clientX}px - 50%), calc(${e.clientY}px - 50%))`;
+        });
+      });
+    });
+
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.type = 'text/css';
+        style.textContent = `
+          *::-webkit-scrollbar { display: none !important; }
+          body { -ms-overflow-style: none !important; scrollbar-width: none !important; }
+        `;
+        document.head.appendChild(style);
+      });
+    });
+
+    page.on('load', async () => {
+      try {
+        this.logger.debug(`[${sessionId}] Сторінка завантажена, форсуємо F11`);
+        await page.keyboard.press('F11');
+      } catch (e) {
+        this.logger.warn(`[${sessionId}] Не вдалося натиснути F11:`, e.message);
+      }
+    });
+
     const targetOrigin = new URL(url).origin;
 
     // 2. Обмеження: Блокування роутів (AllowedRoutes)
-    await this.applyRouteRestrictions(page, allowedRoutes, targetOrigin);
+    await this.applyRouteRestrictions(page, [...allowedRoutes, 'https://login.bca.com/'], targetOrigin);
 
     // 3. Автологін (Сценарій)
     await this.performAutoLogin(page, url, authData);
@@ -182,40 +235,58 @@ export class BrowserService {
     }, forbiddenSelectors);
   }
 
-  private async performAutoLogin(page: Page, url: string, authData: any) {
+  private async performAutoLogin(page: Page, url: string, authData: { email: string, password: string }) {
+    console.log("Autologin start")
     this.logger.log(`Автологін на ${url}`);
-    await page.goto(url, { waitUntil: 'networkidle' });
-    await page.keyboard.press('F11');
 
-    // 3. (Важливо!) Скролбари F11 не сховає, тому CSS-хак все ще потрібен:
-    await page.addStyleTag({
-      content: `
-    *::-webkit-scrollbar { 
-      display: none !important; 
-    }
-    body { 
-      -ms-overflow-style: none !important;
-      scrollbar-width: none !important;
-    }
-  `
-    });
-
-    // ПРИКЛАД: Логіка заповнення форми.
-    // У реальності тут може бути вставка cookies або виклик API для отримання токена
     try {
-      const emailInput = await page.$(
-        'input[type="email"], input[name="email"], input[name="username"]'
-      );
-      const passInput = await page.$('input[type="password"], input[name="password"]');
+      // 1. Змінюємо очікування на 'domcontentloaded' - це часто працює краще для Angular
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-      if (emailInput && passInput) {
-        await emailInput.fill(authData.email);
-        await passInput.fill(authData.password);
-        await page.keyboard.press('Enter');
-        await page.waitForNavigation({ waitUntil: 'networkidle' });
+      // 2. ДІАГНОСТИКА: Чекаємо, поки кнопка Login з'явиться ВІЗУАЛЬНО.
+      // Якщо сторінка пуста, скрипт впаде ТУТ із зрозумілою помилкою, а не пізніше.
+      const loginTrigger = page.locator('[data-el="login"]');
+      this.logger.log('Чекаємо на повний рендер сторінки (появу кнопки Login)...');
+      await loginTrigger.waitFor({ state: 'visible', timeout: 15000 });
+      this.logger.log('Сторінка успішно відобразилась!');
+
+      // 3. Обробка банера Cookies
+      const acceptCookiesBtn = page.locator('#onetrust-accept-btn-handler');
+      try {
+        await acceptCookiesBtn.waitFor({ state: 'visible', timeout: 3000 });
+        await acceptCookiesBtn.click();
+        this.logger.log('Кукі прийнято.');
+      } catch (e) {
+        this.logger.log('Банер кукісів не знайдено, йдемо далі.');
       }
+
+      // 4. Клікаємо на кнопку Login
+      await loginTrigger.click();
+
+      // 5. Чекаємо появи поля вводу
+      const usernameInput = page.locator('#username');
+      await usernameInput.waitFor({ state: 'visible', timeout: 10000 });
+
+      // 6. Вводимо дані
+      await usernameInput.fill(authData.email);
+      await page.locator('#password').fill(authData.password);
+
+      // 7. Клікаємо Увійти
+      await page.locator('#loginButton').click();
+
+      this.logger.log('Дані введено, чекаємо на логін...');
+      await page.waitForLoadState('networkidle');
+
     } catch (e) {
-      this.logger.error('Помилка автологіну', e);
+      this.logger.error('Помилка під час виконання автологіну:', e);
+      // ДУЖЕ КОРИСНО: Робимо скріншот у разі помилки, щоб побачити, що саме бачить Playwright
+      // (навіть якщо трансляція показує пустий екран)
+      try {
+        await page.screenshot({ path: `/tmp/error-login-${Date.now()}.png` });
+        this.logger.log('Скріншот помилки збережено у /tmp/');
+      } catch (screenshotError) {
+        this.logger.error('Не вдалося зробити скріншот', screenshotError);
+      }
     }
   }
 
@@ -224,12 +295,58 @@ export class BrowserService {
     const page = this.activePages.get(sessionId);
     if (!page) return;
 
-    if (action.type === 'click') {
-      await page.mouse.click(action.x, action.y);
-    } else if (action.type === 'keydown') {
-      if (action.key === 'F12') return;
-      if (action.key === 'F11') return;
-      await page.keyboard.press(action.key);
+    try {
+      switch (action.type) {
+        case 'mousemove':
+          await page.mouse.move(action.x, action.y);
+          break;
+
+        case 'mousedown':
+          // button: 0 (ліва), 1 (коліщатко), 2 (права) у React, 
+          // а в Playwright це 'left', 'middle', 'right'
+          const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
+          await page.mouse.down({ button: downBtn });
+          break;
+
+        case 'mouseup':
+          const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
+          await page.mouse.up({ button: upBtn });
+          break;
+
+        case 'click': // Якщо захочете використовувати click замість down/up
+          await page.mouse.click(action.x, action.y);
+          break;
+
+        case 'wheel':
+          await page.mouse.wheel(action.deltaX, action.deltaY);
+          break;
+
+        case 'keydown':
+          // Playwright може кидати помилки на деякі специфічні клавіші (наприклад 'Dead')
+          if (action.key.length === 1 || this.isValidPlaywrightKey(action.key)) {
+            await page.keyboard.down(action.key);
+          }
+          break;
+
+        case 'keyup':
+          if (action.key.length === 1 || this.isValidPlaywrightKey(action.key)) {
+            await page.keyboard.up(action.key);
+          }
+          break;
+      }
+    } catch (e) {
+      // Ігноруємо дрібні помилки типу "невідома клавіша", щоб не спамити логи
+      this.logger.debug(`[Browser] Не вдалося виконати дію ${action.type}: ${e.message}`);
     }
+  }
+
+  // Допоміжний метод, щоб відсіяти системні клавіші, які Playwright не розуміє
+  private isValidPlaywrightKey(key: string): boolean {
+    const validKeys = [
+      'Backspace', 'Tab', 'Enter', 'Shift', 'Control', 'Alt', 'CapsLock', 'Escape',
+      'PageUp', 'PageDown', 'End', 'Home', 'ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown',
+      'Insert', 'Delete', 'Meta' // Meta = Win/Cmd
+    ];
+    return validKeys.includes(key);
   }
 }
