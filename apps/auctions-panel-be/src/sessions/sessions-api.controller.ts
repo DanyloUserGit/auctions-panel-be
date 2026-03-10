@@ -14,6 +14,6 @@ export class SessionsApiController {
 
   @Delete(':id')
   finish(@Param('id') id: string, @Req() req) {
-    return this.sessionsService.finishSession(id, req.user.id);
+    return this.sessionsService.terminateSession(id, req.user.id);
   }
 }
