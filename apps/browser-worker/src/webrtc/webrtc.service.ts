@@ -56,6 +56,12 @@ export class WebrtcService {
       mimeType: 'video/VP8',
       clockRate: 90000,
       payloadType: 96,
+      rtcpFeedback: [
+        { type: 'nack' },
+        { type: 'nack', parameter: 'pli' },
+        { type: 'goog-remb' },
+      ],
+      parameters: 'x-google-start-bitrate=1000',
     });
 
     const videoTrack = new MediaStreamTrack({ kind: 'video', codec });
@@ -74,11 +80,34 @@ export class WebrtcService {
     await pc.setRemoteDescription(offer);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+    await new Promise<void>((resolve) => {
+      if (pc.iceGatheringState === 'complete') return resolve();
+
+      const timeout = setTimeout(resolve, 1500);
+
+      pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete') {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+    });
 
     // Запускаємо FFmpeg ЛИШЕ ЯКЩО він ще не запущений для цієї сесії
     if (!this.ffmpegProcesses.has(sessionId)) {
       this.startVideoStreaming(sessionId, viewport);
     }
+
+    if (!pc.localDescription) {
+      this.logger.warn(`[WebrtcService] localDescription відсутній, повертаємо базовий answer`);
+      return { type: answer.type, sdp: answer.sdp };
+    }
+
+    // ✅ Повертаємо localDescription, який вже містить зібрані IP
+    // return {
+    //   type: pc.localDescription.type,
+    //   sdp: pc.localDescription.sdp,
+    // };
 
     return answer;
   }
@@ -104,19 +133,29 @@ export class WebrtcService {
     const display = process.env.DISPLAY || ':99';
 
     const ffmpegCmd = spawn('ffmpeg', [
+      '-loglevel', 'debug',
       '-f', 'x11grab',
-      '-draw_mouse', '0',
-      '-video_size', `${viewport.width || 1280}x${viewport.height || 720}`,
-      '-framerate', '30',
+      '-s', `${viewport.width}x${viewport.height}`,
       '-i', `${display}.0+0,0`,
+      // Обов'язково додаємо фільтр для парних пікселів (FFmpeg падає без цього на непарних екранах)
+      '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
       '-c:v', 'libvpx',
-      '-b:v', '1.5M',
+      '-pix_fmt', 'yuv420p',
+      '-threads', '4',
       '-deadline', 'realtime',
       '-cpu-used', '8',
-      '-payload_type', '96',
+      '-b:v', '2M',
+      '-g', '30', // Краще 30 (або як fps), а не 10
+      '-keyint_min', '30',
+      '-payload_type', '96',        // 🛑 ПОВЕРНУТО
+      '-slice-max-size', '1200',    // 🛑 ПОВЕРНУТО (Життєво необхідно для WebRTC UDP)
       '-f', 'rtp',
       `rtp://127.0.0.1:${port}`,
     ]);
+
+    // ffmpegCmd.stderr.on('data', (data) => {
+    //   this.logger.debug(`[FFmpeg ${sessionId}]: ${data.toString()}`);
+    // });
 
     this.ffmpegProcesses.set(sessionId, ffmpegCmd);
   }
@@ -153,6 +192,14 @@ export class WebrtcService {
       }
       this.connections.delete(sessionId);
       this.videoTracks.delete(sessionId);
+    }
+  }
+  async addIceCandidate(sessionId: string, clientId: string, candidate: any) {
+    const pc = this.connections.get(sessionId)?.get(clientId);
+    if (pc && candidate) {
+      await pc.addIceCandidate(candidate).catch(e =>
+        this.logger.error(`Помилка додавання кандидата для клієнта ${clientId}`, e)
+      );
     }
   }
 }

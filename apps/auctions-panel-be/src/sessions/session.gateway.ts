@@ -1,16 +1,16 @@
+import { Inject } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import {
-  WebSocketGateway,
-  SubscribeMessage,
-  MessageBody,
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { SessionsService } from './sessions.service';
-import { Inject } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
 
 @WebSocketGateway({
   cors: {
@@ -103,6 +103,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
         height: payload.height,
       })
       .subscribe({
+        next: (m) => console.log(`Відправлено до сесії: ${payload.sessionId}`),
         error: (err) => console.error('❌ Помилка передачі WebRTC сигналу:', err),
       });
   }
