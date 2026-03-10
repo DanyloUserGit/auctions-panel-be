@@ -16,10 +16,12 @@ export class TrainingService {
         });
     }
 
-    async uploadImageToMaterial(materialId: string, file: Express.Multer.File, user: any) {
-
+    async uploadImageToMaterial(materialId: string, file: Express.Multer.File) {
+        console.log("materialId " + materialId);
         const material = await this.prisma.trainingMaterial.findUnique({ where: { id: materialId } });
+        console.log("material " + material)
         if (!material) {
+            console.log('Матеріал не знайдено')
             throw new NotFoundException('Матеріал не знайдено');
         }
 
@@ -87,8 +89,8 @@ export class TrainingService {
                 },
                 {
                     OR: [
-                        { allowedRoles: { isEmpty: true } }, 
-                        { allowedRoles: { has: user.role } }, 
+                        { allowedRoles: { isEmpty: true } },
+                        { allowedRoles: { has: user.role } },
                     ],
                 },
             ];
