@@ -48,18 +48,4 @@ export class SessionDispatcherController {
         );
     }
 
-    @Post(':id/terminate')
-    async terminateSession(
-        @Param('id', ParseUUIDPipe) sessionId: string,
-        @Request() req: any,
-    ) {
-        const user = req.user;
-
-        return this.dispatcherService.terminateSession(
-            sessionId,
-            user.id,
-            user.role,
-            user.auctionGroupId
-        );
-    }
 }

@@ -116,8 +116,7 @@ export class TrainingController {
     async uploadMaterialImage(
         @Param('id') id: string,
         @UploadedFile() file: Express.Multer.File,
-        @Req() req,
     ) {
-        return this.trainingService.uploadImageToMaterial(id, file, req.user);
+        return this.trainingService.uploadImageToMaterial(id, file);
     }
 }
