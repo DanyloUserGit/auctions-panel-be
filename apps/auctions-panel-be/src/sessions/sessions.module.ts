@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { SessionsService } from './sessions.service';
 import { SessionGateway } from './session.gateway';
 import { SessionsApiController } from './sessions-api.controller';
+import { SessionLoggerModule } from '../session-logger/session-logger.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SessionsApiController } from './sessions-api.controller';
       },
     ]),
     PrismaModule,
+    SessionLoggerModule
   ],
   controllers: [SessionsController, SessionsApiController],
   providers: [SessionsService, SessionGateway],

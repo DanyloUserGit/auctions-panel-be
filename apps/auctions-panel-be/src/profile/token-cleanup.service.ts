@@ -8,7 +8,6 @@ export class TokenCleanupService {
 
   @Cron('*/2 * * * *')
   async handleCleanup() {
-    console.log('Cleaning up expired tokens...');
     const result = await this.profileService.cleanExpiredTokens();
   }
 }
