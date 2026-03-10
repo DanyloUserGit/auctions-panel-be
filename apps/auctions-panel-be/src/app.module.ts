@@ -16,6 +16,7 @@ import { MailModule } from './mail/mail.module';
 import { ProfileModule } from './profile/profile.module';
 import { NotificationModule } from './notification/notification.module';
 import { TrainingModule } from './training/training.module';
+import { SessionLoggerModule } from './session-logger/session-logger.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { TrainingModule } from './training/training.module';
     ProfileModule,
     NotificationModule,
     TrainingModule,
+    SessionLoggerModule,
   ],
   providers: [
     {

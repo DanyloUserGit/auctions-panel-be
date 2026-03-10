@@ -119,6 +119,7 @@ export class UsersService {
         lastName: true,
         role: true,
         rights: true,
+        auctionGroupId:true
       },
     });
     if (!user) {
