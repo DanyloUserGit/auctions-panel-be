@@ -3,6 +3,7 @@ import {
     ForbiddenException,
     Get,
     Query,
+    Req,
     Request,
     UseGuards
 } from '@nestjs/common';
@@ -48,10 +49,14 @@ export class SessionLoggerController {
     async getForbiddenActions(
         @Query('skip') skip: string,
         @Query('take') take: string,
-        @Request() req: any,
+        @Req() req: { user: User },
     ) {
         const user = req.user;
-        const auctionGroupId = user.role !== Roles.SuperAdmin ? user.auctionGroupId : undefined;
+        if (!user.auctionGroupId) {
+            if (!(user.role == Roles.SuperAdmin))
+                throw new ForbiddenException("Ви не керуєте жодною групою");
+        }
+        const auctionGroupId: string | undefined = (user.role !== Roles.SuperAdmin ? user.auctionGroupId : undefined) ?? undefined;
 
         return this.loggerService.getForbiddenActionsJournal(
             auctionGroupId,

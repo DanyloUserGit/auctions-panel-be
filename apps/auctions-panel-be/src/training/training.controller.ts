@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
 import { RolesGuard } from '../auth/roles.guard';
 import { RolesDecorator } from '../decorators/roles.decorator';
-import { CreateInfoPageDto, CreateTrainingDto } from './dto/create-training.dto';
+import { CreateInfoPageDto, CreateTrainingDto, UpdateInfoPageDto } from './dto/create-training.dto';
 import { TrainingService } from './training.service';
 
 @ApiTags('Training & Information')
@@ -12,11 +12,27 @@ import { TrainingService } from './training.service';
 export class TrainingController {
     constructor(private readonly trainingService: TrainingService) { }
 
+
     @Get('info')
     @ApiOperation({ summary: 'Отримати список всіх інформаційних сторінок (FAQ, правила)' })
+    @ApiQuery({ name: 'search', required: false, description: 'Пошук по заголовку' })
     @ApiResponse({ status: 200, description: 'Список інформаційних сторінок успішно отримано.' })
-    getAllInfoPages() {
-        return this.trainingService.getAllInfoPages();
+    getAllInfoPages(@Query('search') search?: string) {
+        return this.trainingService.getAllInfoPages(search);
+    }
+
+    @Patch('info/:id')
+    @UseGuards(RolesGuard)
+    @RolesDecorator(Roles.SuperAdmin)
+    @ApiOperation({ summary: 'Редагувати інформаційну сторінку (Тільки SuperAdmin)' })
+    @ApiParam({ name: 'id', description: 'UUID інформаційної сторінки' })
+    @ApiResponse({ status: 200, description: 'Сторінку успішно оновлено.' })
+    @ApiResponse({ status: 404, description: 'Сторінку не знайдено.' })
+    updateInfoPage(
+        @Param('id') id: string,
+        @Body() dto: UpdateInfoPageDto
+    ) {
+        return this.trainingService.updateInfoPage(id, dto);
     }
 
     @Get('info/:slug')
@@ -54,6 +70,22 @@ export class TrainingController {
     @ApiResponse({ status: 404, description: 'Матеріал не знайдено.' })
     getMaterialById(@Param('id') id: string, @Req() req) {
         return this.trainingService.getTrainingMaterialById(id, req.user);
+    }
+
+    @Patch('materials/:id')
+    @UseGuards(RolesGuard)
+    @RolesDecorator(Roles.SuperAdmin, Roles.Admin)
+    @ApiOperation({ summary: 'Редагувати навчальний матеріал (SuperAdmin, Admin)' })
+    @ApiParam({ name: 'id', description: 'UUID матеріалу' })
+    @ApiResponse({ status: 200, description: 'Матеріал успішно оновлено.' })
+    @ApiResponse({ status: 403, description: 'Немає доступу до редагування матеріалу іншої групи.' })
+    @ApiResponse({ status: 404, description: 'Матеріал не знайдено.' })
+    updateMaterial(
+        @Param('id') id: string,
+        @Req() req,
+        @Body() dto: CreateTrainingDto
+    ) {
+        return this.trainingService.updateTrainingMaterial(id, req.user, dto);
     }
 
     @Post('materials')
@@ -116,7 +148,9 @@ export class TrainingController {
     async uploadMaterialImage(
         @Param('id') id: string,
         @UploadedFile() file: Express.Multer.File,
+        @Req() req
     ) {
-        return this.trainingService.uploadImageToMaterial(id, file);
+        console.log(id, file, req.user)
+        return this.trainingService.uploadImageToMaterial(id, file, req.user);
     }
 }
