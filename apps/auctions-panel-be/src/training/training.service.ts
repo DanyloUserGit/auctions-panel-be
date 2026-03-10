@@ -53,7 +53,7 @@ export class TrainingService {
 
     async getAllInfoPages() {
         return this.prisma.informationPage.findMany({
-            select: { id: true, title: true, slug: true }, // Віддаємо лише список без важкого контенту
+            select: { id: true, title: true, slug: true },
         });
     }
 

@@ -6,16 +6,18 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { Roles, Session, SessionRights } from '@prisma/client';
+import { Roles, Session, SessionEventType, SessionRights } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptData } from '../utils/encrypt';
+import { SessionLoggerService } from '../session-logger/session-logger.service';
 
 @Injectable()
 export class SessionsService implements OnModuleInit {
   private pendingClosures = new Map<string, NodeJS.Timeout>();
   constructor(
     private prisma: PrismaService,
-    @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy
+    @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy,
+    private loggerService: SessionLoggerService
   ) { }
 
   async onModuleInit() {
@@ -40,41 +42,62 @@ export class SessionsService implements OnModuleInit {
       },
     });
   }
-  async finishSession(sessionId: string, userId: string) {
+  async terminateSession(sessionId: string, adminId: string) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
-      include: { auction: true, account: true },
     });
 
     if (!session) {
       throw new BadRequestException('Сесію не знайдено');
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new ForbiddenException('Користувача не знайдено');
-
-    const isAdmin = user.role === Roles.SuperAdmin || user.role === Roles.Admin;
-    if (!isAdmin) {
-      throw new ForbiddenException('Недостатньо прав для завершення сесії');
-    }
-
     if (!session.isActive) {
-      return session;
+      throw new BadRequestException('Ця сесія вже завершена');
     }
+
+    const admin = await this.prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin) throw new ForbiddenException('Користувача не знайдено');
+
+    if (admin.role !== Roles.SuperAdmin) {
+      if (admin.role !== Roles.Admin || session.auctionGroupId !== admin.auctionGroupId) {
+        throw new ForbiddenException('У вас немає прав для завершення сесії іншої групи');
+      }
+    }
+
+    const updatedSession = await this.prisma.session.update({
+      where: { id: sessionId },
+      data: {
+        isActive: false,
+        activeConnections: 0,
+        endedAt: new Date(),
+        endedById: adminId
+      },
+    });
+
+    await this.loggerService.logEvent({
+      sessionId: session.id,
+      userId: adminId,
+      eventType: SessionEventType.Other,
+      severity: 'Warning',
+      message: 'Сесія була примусово завершена диспетчером',
+      isIncident: true,
+    });
 
     this.rabbitClient
       .emit('stop_browser_session', {
         sessionId: session.id,
       })
       .subscribe({
-        next: () => console.log(`Сесія ${session.id} завершена у worker`),
-        error: (err) => console.error('RabbitMQ stop error:', err),
+        next: () => console.log(`[SessionsService] Сигнал на закриття сесії ${session.id} відправлено у worker`),
+        error: (err) => console.error('[SessionsService] RabbitMQ stop error:', err),
       });
 
-    await this.prisma.session.delete({
-      where: { id: session.id },
-    });
-    return { deleted: true };
+    if (this.pendingClosures.has(sessionId)) {
+      clearTimeout(this.pendingClosures.get(sessionId));
+      this.pendingClosures.delete(sessionId);
+    }
+
+    return updatedSession;
   }
 
   async initializeSession(
@@ -190,7 +213,14 @@ export class SessionsService implements OnModuleInit {
             if (checkSession && checkSession.activeConnections === 0) {
               await this.prisma.session.update({
                 where: { id: sessionId },
-                data: { isActive: false },
+                data: { isActive: false, endedAt: new Date() },
+              });
+
+              await this.loggerService.logEvent({
+                sessionId,
+                eventType: SessionEventType.Other,
+                severity: 'Info',
+                message: 'Сесія завершена автоматично (немає активних підключень)',
               });
 
               // ДОДАНО .subscribe() - тепер команда реально дійде до Worker-а!
