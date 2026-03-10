@@ -1,19 +1,16 @@
 import {
     Controller,
+    ForbiddenException,
     Get,
-    Post,
-    Param,
     Query,
-    UseGuards,
-    Request,
-    ParseUUIDPipe,
-    ForbiddenException
+    Req,
+    UseGuards
 } from '@nestjs/common';
-import { SessionDispatcherService } from './session-dispatcher.service';
-import type { SessionFilterDto } from './dto/session-filter.dto';
 import { Roles, User } from '@prisma/client';
 import { RolesGuard } from '../auth/roles.guard';
 import { RolesDecorator } from '../decorators/roles.decorator';
+import type { SessionFilterDto } from './dto/session-filter.dto';
+import { SessionDispatcherService } from './session-dispatcher.service';
 
 
 @UseGuards(RolesGuard)
@@ -25,7 +22,7 @@ export class SessionDispatcherController {
     @Get()
     async getSessions(
         @Query() filters: SessionFilterDto,
-        @Request() req: { user: User },
+        @Req() req: { user: User },
     ) {
         const user = req.user;
 

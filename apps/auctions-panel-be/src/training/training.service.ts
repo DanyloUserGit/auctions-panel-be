@@ -2,9 +2,9 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { MaterialVisibility, Roles, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-import { CreateInfoPageDto, CreateTrainingDto } from './dto/create-training.dto';
 import { v2 as cloudinary } from 'cloudinary';
 import * as streamifier from 'streamifier';
+import { CreateInfoPageDto, CreateTrainingDto, UpdateInfoPageDto } from './dto/create-training.dto';
 
 @Injectable()
 export class TrainingService {
@@ -16,7 +16,7 @@ export class TrainingService {
         });
     }
 
-    async uploadImageToMaterial(materialId: string, file: Express.Multer.File) {
+    async uploadImageToMaterial(materialId: string, file: Express.Multer.File, user: User) {
         console.log("materialId " + materialId);
         const material = await this.prisma.trainingMaterial.findUnique({ where: { id: materialId } });
         console.log("material " + material)
@@ -53,8 +53,17 @@ export class TrainingService {
         }
     }
 
-    async getAllInfoPages() {
+    async getAllInfoPages(search?: string) {
+        const whereClause: any = {};
+
+        if (search) {
+            whereClause.OR = [
+                { title: { contains: search, mode: 'insensitive' } },
+            ];
+        }
+
         return this.prisma.informationPage.findMany({
+            where: whereClause,
             select: { id: true, title: true, slug: true },
         });
     }
@@ -67,6 +76,36 @@ export class TrainingService {
 
     async createInfoPage(data: CreateInfoPageDto) {
         return this.prisma.informationPage.create({ data });
+    }
+
+    async updateInfoPage(id: string, data: UpdateInfoPageDto) {
+        const page = await this.prisma.informationPage.findUnique({ where: { id } });
+        if (!page) throw new NotFoundException('Інформаційну сторінку не знайдено');
+
+        return this.prisma.informationPage.update({
+            where: { id },
+            data,
+        });
+    }
+
+    async updateTrainingMaterial(id: string, user: User, data: CreateTrainingDto) {
+        const material = await this.prisma.trainingMaterial.findUnique({ where: { id } });
+        if (!material) throw new NotFoundException('Матеріал не знайдено');
+
+        if (user.role !== Roles.SuperAdmin) {
+            const groupAdminInfo = await this.prisma.auctionGroup.findUnique({
+                where: { groupAdminId: user.id }
+            });
+
+            if (!groupAdminInfo || material.groupId !== groupAdminInfo.id) {
+                throw new ForbiddenException('Ви можете редагувати лише матеріали своєї групи');
+            }
+        }
+
+        return this.prisma.trainingMaterial.update({
+            where: { id },
+            data,
+        });
     }
 
     async getTrainingMaterials(user: any, search?: string) {
