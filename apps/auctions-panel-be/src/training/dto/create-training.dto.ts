@@ -40,3 +40,11 @@ export class CreateInfoPageDto {
   @IsString()
   content: string;
 }
+
+export class UpdateInfoPageDto {
+  @IsString()
+  title: string;
+  
+  @IsString()
+  content: string;
+}
