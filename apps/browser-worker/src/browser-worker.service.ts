@@ -2,6 +2,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'path';
 import { Browser, BrowserContext, chromium, Page } from 'playwright';
+import UserAgent from 'user-agents';
 
 interface ActiveSession {
   browser: Browser;
@@ -74,9 +75,11 @@ export class BrowserService {
     const userDataDir = path.join('/tmp/playwright_sessions', sessionId);
 
     this.logger.log(`Запуск Playwright для сесії ${sessionId}, ${viewport}`);
+    const userAgent = new UserAgent();
     const safeWidth = Math.min(viewport.width, 1920);
     const safeHeight = Math.min(viewport.height, 1080);
     const args = [
+      '--display=:99',
       '--kiosk',
       '--hide-scrollbars',
       '--disable-infobars',
@@ -87,17 +90,20 @@ export class BrowserService {
       '--disable-dev-shm-usage',
       '--disable-infobars',
       '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--force-cpu-draw',
       '--ignore-certificate-errors',
     ];
     // if (process.env.NODE_ENV === 'production') {
     //  args.push('--display=:99');
     // }
 
-    // Запускаємо persistentContext з прив'язкою до віртуального дисплея Xvfb (:99)
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false, // Обов'язково false для Xvfb
+      headless: false, 
       viewport,
       args,
+      userAgent:userAgent.toString(),
+      ignoreHTTPSErrors: true
     });
 
     const page = await context.newPage();
@@ -156,12 +162,13 @@ export class BrowserService {
     });
 
     const targetOrigin = new URL(url).origin;
+    const cleanUrl = url.trim().replace(/[\u200B-\u200D\uFEFF\u2060]/g, '');
 
     // 2. Обмеження: Блокування роутів (AllowedRoutes)
-    await this.applyRouteRestrictions(page, [...allowedRoutes, 'https://login.bca.com/'], targetOrigin);
+    // await this.applyRouteRestrictions(page, [...allowedRoutes, 'https://login.bca.com/'], targetOrigin);
 
     // 3. Автологін (Сценарій)
-    await this.performAutoLogin(page, url, authData);
+    await this.performAutoLogin(page, cleanUrl, authData);
 
     // 4. Обмеження: Блокування кнопок (ForbiddenSelectors)
     await this.applyUIConstraints(page, forbiddenSelectors);
@@ -239,57 +246,62 @@ export class BrowserService {
     console.log("Autologin start")
     this.logger.log(`Автологін на ${url}`);
 
-    // try {
-    //   // 1. Змінюємо очікування на 'domcontentloaded' - це часто працює краще для Angular
-    //   await page.goto(url, { waitUntil: 'domcontentloaded' });
+    try {
+      // 1. Змінюємо очікування на 'domcontentloaded' - це часто працює краще для Angular
+      await page.goto(url, { waitUntil: 'networkidle' });
+      // await page.evaluate(() => {
+      //   document.body.style.backgroundColor = 'red';
+      // });
+      // console.log('🔴 Встановив червоний фон для тесту');
 
-    //   // 2. ДІАГНОСТИКА: Чекаємо, поки кнопка Login з'явиться ВІЗУАЛЬНО.
-    //   // Якщо сторінка пуста, скрипт впаде ТУТ із зрозумілою помилкою, а не пізніше.
-    //   const loginTrigger = page.locator('[data-el="login"]');
-    //   this.logger.log('Чекаємо на повний рендер сторінки (появу кнопки Login)...');
-    //   await loginTrigger.waitFor({ state: 'visible', timeout: 15000 });
-    //   this.logger.log('Сторінка успішно відобразилась!');
+      // 2. ДІАГНОСТИКА: Чекаємо, поки кнопка Login з'явиться ВІЗУАЛЬНО.
+      // Якщо сторінка пуста, скрипт впаде ТУТ із зрозумілою помилкою, а не пізніше.
 
-    //   // 3. Обробка банера Cookies
-    //   const acceptCookiesBtn = page.locator('#onetrust-accept-btn-handler');
-    //   try {
-    //     await acceptCookiesBtn.waitFor({ state: 'visible', timeout: 3000 });
-    //     await acceptCookiesBtn.click();
-    //     this.logger.log('Кукі прийнято.');
-    //   } catch (e) {
-    //     this.logger.log('Банер кукісів не знайдено, йдемо далі.');
-    //   }
+      const loginTrigger = page.locator('[data-el="login"]');
+      this.logger.log('Чекаємо на повний рендер сторінки (появу кнопки Login)...');
+      await loginTrigger.waitFor({ state: 'visible', timeout: 15000 });
+      this.logger.log('Сторінка успішно відобразилась!');
 
-    //   // 4. Клікаємо на кнопку Login
-    //   await loginTrigger.click();
+      // 3. Обробка банера Cookies
+      const acceptCookiesBtn = page.locator('#onetrust-accept-btn-handler');
+      try {
+        await acceptCookiesBtn.waitFor({ state: 'visible', timeout: 3000 });
+        await acceptCookiesBtn.click();
+        this.logger.log('Кукі прийнято.');
+      } catch (e) {
+        this.logger.log('Банер кукісів не знайдено, йдемо далі.');
+      }
 
-    //   // 5. Чекаємо появи поля вводу
-    //   const usernameInput = page.locator('#username');
-    //   await usernameInput.waitFor({ state: 'visible', timeout: 10000 });
+      // 4. Клікаємо на кнопку Login
+      await loginTrigger.click();
 
-    //   // 6. Вводимо дані
-    //   await usernameInput.fill(authData.email);
-    //   await page.locator('#password').fill(authData.password);
+      // 5. Чекаємо появи поля вводу
+      const usernameInput = page.locator('#username');
+      await usernameInput.waitFor({ state: 'visible', timeout: 10000 });
 
-    //   // 7. Клікаємо Увійти
-    //   await page.locator('#loginButton').click();
+      // 6. Вводимо дані
+      await usernameInput.fill(authData.email);
+      await page.locator('#password').fill(authData.password);
 
-    //   this.logger.log('Дані введено, чекаємо на логін...');
-    //   await page.screenshot({ path: 'debug-screen.png', fullPage: true });
-    //   this.logger.debug('📸 Скріншот збережено у debug-screen.png');
-    //   await page.waitForLoadState('networkidle');
+      // 7. Клікаємо Увійти
+      await page.locator('#loginButton').click();
 
-    // } catch (e) {
-    //   this.logger.error('Помилка під час виконання автологіну:', e);
-    //   // ДУЖЕ КОРИСНО: Робимо скріншот у разі помилки, щоб побачити, що саме бачить Playwright
-    //   // (навіть якщо трансляція показує пустий екран)
-    //   try {
-    //     await page.screenshot({ path: `/tmp/error-login-${Date.now()}.png` });
-    //     this.logger.log('Скріншот помилки збережено у /tmp/');
-    //   } catch (screenshotError) {
-    //     this.logger.error('Не вдалося зробити скріншот', screenshotError);
-    //   }
-    // }
+      this.logger.log('Дані введено, чекаємо на логін...');
+      await page.screenshot({ path: 'debug-screen.png', fullPage: true });
+      this.logger.debug('📸 Скріншот збережено у debug-screen.png');
+      await page.waitForLoadState('networkidle');
+
+    } catch (e) {
+      this.logger.error('Помилка під час виконання автологіну:', e);
+      // ДУЖЕ КОРИСНО: Робимо скріншот у разі помилки, щоб побачити, що саме бачить Playwright
+      // (навіть якщо трансляція показує пустий екран)
+      try {
+        await page.screenshot({ path: `/tmp/error-login-${Date.now()}.png` });
+        this.logger.log('Скріншот помилки збережено у /tmp/');
+      } catch (screenshotError) {
+        this.logger.error('Не вдалося зробити скріншот', screenshotError);
+      }
+    }
   }
 
   // Метод для передачі кліків від користувача (через WebRTC DataChannel)

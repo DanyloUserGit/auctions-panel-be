@@ -77,26 +77,44 @@ export class BrowserWorkerController {
   // 2. Команда на обробку WebRTC Signaling (SDP Offer від React)
   @EventPattern('webrtc_signal_to_worker')
   async handleWebrtcSignal(@Payload() data: any) {
+
+    // 1. Обробка OFFER
     if (data.signalData.type === 'offer') {
       const answer = await this.webrtcService.handleOffer(
         data.sessionId,
-        data.clientId, 
+        data.clientId,
         data.signalData,
         { width: data.width, height: data.height },
         (candidate) => {
+          // ✅ Виправлення 1: Додано .subscribe()
           this.apiClient.emit('webrtc_signal_to_client', {
             sessionId: data.sessionId,
             clientId: data.clientId,
             signalData: { type: 'candidate', candidate },
+          }).subscribe({
+            error: (err) => console.error('Помилка відправки кандидата клієнту:', err)
           });
         }
       );
 
+      // Відправка ANSWER клієнту
       this.apiClient.emit('webrtc_signal_to_client', {
         sessionId: data.sessionId,
-        clientId: data.clientId, // ВАЖЛИВО
+        clientId: data.clientId,
         signalData: { type: 'answer', sdp: answer.sdp },
+      }).subscribe({
+        next: () => console.log(`[Worker] WebRTC Answer відправлено клієнту ${data.clientId}`),
+        error: (err) => console.error('Помилка відправки Answer клієнту:', err)
       });
+    }
+
+    // 2. ✅ Виправлення 2: Обробка CANDIDATE від React-клієнта
+    else if (data.signalData.type === 'candidate' || data.signalData.candidate) {
+      await this.webrtcService.addIceCandidate(
+        data.sessionId,
+        data.clientId,
+        data.signalData.candidate
+      );
     }
   }
   @EventPattern('webrtc_client_disconnect')
