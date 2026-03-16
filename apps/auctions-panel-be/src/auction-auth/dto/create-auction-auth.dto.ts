@@ -2,8 +2,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
 export const CreateAuctionAuthSchema = z.object({
-  email: z.string().email({
-    message: 'Email має бути валідним.',
+  email: z.string({
+    message: 'Акаунт має бути валідним.',
   }),
 
   password: z.string().min(6, { message: 'Пароль має містити мінімум 6 символів.' }),

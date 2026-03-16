@@ -10,13 +10,13 @@ export class AuctionGroupsService {
   constructor(private prisma: PrismaService) { }
 
   async create(createAuctionGroupDto: CreateAuctionGroupDto) {
-    const { auctions, groupAdmin, users, ...rest } = createAuctionGroupDto;
+    const { auctions, Admin, users, ...rest } = createAuctionGroupDto;
 
     return await this.prisma.auctionGroup.create({
       data: {
         ...rest,
-        groupAdmin: {
-          connect: { id: groupAdmin },
+        Admin: {
+          connect: { id: Admin },
         },
         ...(users && {
           users: {
@@ -137,14 +137,14 @@ export class AuctionGroupsService {
   }
 
   async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto) {
-    const { auctions, groupAdmin, users, ...rest } = updateAuctionGroupDto;
+    const { auctions, Admin, users, ...rest } = updateAuctionGroupDto;
 
     return await this.prisma.auctionGroup.update({
       where: { id },
       data: {
         ...rest,
-        groupAdmin: {
-          connect: { id: groupAdmin },
+        Admin: {
+          connect: { id: Admin },
         },
         ...(users && {
           users: {
@@ -171,7 +171,7 @@ export class AuctionGroupsService {
   async search(params: { user?: { id: string; role: Roles }; query?: string }) {
     const { user, query } = params;
     const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
-
+    console.log(query, user, isAdmin);
     return this.prisma.auctionGroup.findMany({
       where: {
         AND: [

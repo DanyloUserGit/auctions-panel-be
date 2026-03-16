@@ -1,14 +1,14 @@
 /*
   Warnings:
 
-  - A unique constraint covering the columns `[groupAdminId]` on the table `auction_groups` will be added. If there are existing duplicate values, this will fail.
+  - A unique constraint covering the columns `[AdminId]` on the table `auction_groups` will be added. If there are existing duplicate values, this will fail.
 
 */
 -- CreateEnum
 CREATE TYPE "NotificationChannel" AS ENUM ('InApp', 'Email', 'Telegram', 'Viber');
 
 -- AlterTable
-ALTER TABLE "auction_groups" ADD COLUMN     "groupAdminId" UUID;
+ALTER TABLE "auction_groups" ADD COLUMN     "AdminId" UUID;
 
 -- AlterTable
 ALTER TABLE "users" ADD COLUMN     "auctionGroupId" UUID,
@@ -60,7 +60,7 @@ CREATE UNIQUE INDEX "user_notification_settings_userId_notificationTypeId_key" O
 CREATE UNIQUE INDEX "group_notification_requirements_groupId_notificationTypeId_key" ON "group_notification_requirements"("groupId", "notificationTypeId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "auction_groups_groupAdminId_key" ON "auction_groups"("groupAdminId");
+CREATE UNIQUE INDEX "auction_groups_AdminId_key" ON "auction_groups"("AdminId");
 
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_auctionGroupId_fkey" FOREIGN KEY ("auctionGroupId") REFERENCES "auction_groups"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -78,4 +78,4 @@ ALTER TABLE "group_notification_requirements" ADD CONSTRAINT "group_notification
 ALTER TABLE "group_notification_requirements" ADD CONSTRAINT "group_notification_requirements_notificationTypeId_fkey" FOREIGN KEY ("notificationTypeId") REFERENCES "notification_types"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "auction_groups" ADD CONSTRAINT "auction_groups_groupAdminId_fkey" FOREIGN KEY ("groupAdminId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "auction_groups" ADD CONSTRAINT "auction_groups_AdminId_fkey" FOREIGN KEY ("AdminId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;

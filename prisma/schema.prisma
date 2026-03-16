@@ -77,7 +77,7 @@ model User {
   resetTokens              ResetToken[]
   auctionGroup             AuctionGroup?             @relation("GroupParticipants", fields: [auctionGroupId], references: [id])
   auctionGroupId           String?                   @db.Uuid()
-  managedGroup             AuctionGroup?             @relation("GroupAdministrator")
+  managedGroup             AuctionGroup?             @relation("Administrator")
   userNotificationSettings UserNotificationSetting[]
   notifications            Notification[]
   trainingMaterials        TrainingMaterial[]
@@ -237,6 +237,7 @@ model Auction {
   auctionGroupId     String?             @db.Uuid()
   allowedRoutes      AllowedRoute[]
   forbiddenSelectors ForbiddenSelector[]
+  forbiddenRoutes    ForbiddenRoute[]
 
   @@map("auctions")
 }
@@ -249,8 +250,8 @@ model AuctionGroup {
 
   users User[] @relation("GroupParticipants")
 
-  groupAdminId                  String?                        @unique @db.Uuid()
-  groupAdmin                    User?                          @relation("GroupAdministrator", fields: [groupAdminId], references: [id])
+  AdminId                       String?                        @unique @db.Uuid()
+  Admin                         User?                          @relation("Administrator", fields: [AdminId], references: [id])
   groupNotificationRequirements GroupNotificationRequirement[]
   trainingMaterials             TrainingMaterial[]
 
@@ -264,6 +265,15 @@ model AllowedRoute {
   auction   Auction @relation(fields: [auctionId], references: [id])
 
   @@map("allowed_routes")
+}
+
+model ForbiddenRoute {
+  id        String  @id @default(uuid()) @db.Uuid()
+  path      String
+  auctionId String  @db.Uuid
+  auction   Auction @relation(fields: [auctionId], references: [id])
+
+  @@map("forbidden_routes")
 }
 
 model ForbiddenSelector {
@@ -296,7 +306,7 @@ model SessionLog {
   sessionId String  @db.Uuid()
   session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  userId String? @db.Uuid() 
+  userId String? @db.Uuid()
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   eventType SessionEventType

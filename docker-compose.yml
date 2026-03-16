@@ -41,13 +41,12 @@ services:
     depends_on:
       - rabbitmq
     restart: always
-    shm_size: '2gb'
+    shm_size: '8gb' # 3gb max on prod!
     env_file:
       - .env
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672
       - NODE_ENV=development
-      - DISPLAY=:99
       - WEBRTC_ANNOUNCED_IP=127.0.0.1
     ports:
       - "10000-10050:10000-10050/udp"

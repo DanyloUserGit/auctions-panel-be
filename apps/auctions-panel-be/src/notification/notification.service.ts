@@ -158,7 +158,7 @@ export class NotificationService {
     async setGroupMandatoryRequirement(adminUserId: string, groupId: string, typeId: string, isMandatory: boolean) {
         const group = await this.prisma.auctionGroup.findUnique({ where: { id: groupId } });
 
-        if (!group || group.groupAdminId !== adminUserId) {
+        if (!group || group.AdminId !== adminUserId) {
             throw new ForbiddenException("Тільки адміністратор групи може змінювати ці налаштування");
         }
 

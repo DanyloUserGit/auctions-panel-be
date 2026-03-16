@@ -25,9 +25,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 WORKDIR /app
 
-# Встановлюємо xvfb та ffmpeg
+# Встановлюємо ffmpeg
 RUN apt-get update && apt-get install -y \
-    xvfb \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,4 +42,4 @@ ENV NODE_ENV=production
 ENV DISPLAY=:99 
 
 # Запускаємо скомпільований worker
-CMD ["sh", "-c", "rm -f /tmp/.X99-lock && xvfb-run --server-num=99 -s '-screen 0 1920x1080x24' node dist/apps/browser-worker/main.js"]
+CMD ["node", "dist/apps/browser-worker/main.js"]
