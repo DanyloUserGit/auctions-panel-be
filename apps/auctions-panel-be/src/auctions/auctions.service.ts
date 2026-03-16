@@ -1,12 +1,14 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Roles } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddPathDto } from './dto/add-path.dto';
+import { AddSelectorDto } from './dto/add-selector.dto';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
 
 @Injectable()
 export class AuctionsService {
-  constructor(private prismaService: PrismaService) {}
+  constructor(private prismaService: PrismaService) { }
 
   async create(createAuctionDto: CreateAuctionDto) {
     const { users, sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
@@ -225,37 +227,37 @@ export class AuctionsService {
     const { user, query, auctionGroupId } = params;
 
     const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
-
+    console.log(user, query, auctionGroupId, isAdmin);
     return this.prismaService.auction.findMany({
       where: {
         AND: [
           query
             ? {
-                OR: [
-                  {
-                    title: {
-                      contains: query,
-                      mode: 'insensitive',
-                    },
+              OR: [
+                {
+                  title: {
+                    contains: query,
+                    mode: 'insensitive',
                   },
-                  {
-                    url: {
-                      contains: query,
-                      mode: 'insensitive',
-                    },
+                },
+                {
+                  url: {
+                    contains: query,
+                    mode: 'insensitive',
                   },
-                ],
-              }
+                },
+              ],
+            }
             : {},
 
           auctionGroupId ? { auctionGroupId } : {},
 
           !isAdmin
             ? {
-                users: {
-                  some: { id: user?.id },
-                },
-              }
+              users: {
+                some: { id: user?.id },
+              },
+            }
             : {},
         ],
       },
@@ -264,5 +266,112 @@ export class AuctionsService {
       },
       orderBy: { title: 'asc' },
     });
+  }
+
+  async addSelector(auctionId: string, body: AddSelectorDto) {
+    try {
+      const selector = await this.prismaService.forbiddenSelector.create({
+        data: {
+          ...body,
+          auction: {
+            connect: { id: auctionId },
+          },
+        }
+      })
+      return selector;
+    } catch (error) {
+      throw error;
+    }
+  }
+  async addPathAllowed(auctionId: string, body: AddPathDto) {
+    try {
+      const allowed = await this.prismaService.allowedRoute.create({
+        data: {
+          ...body,
+          auction: {
+            connect: { id: auctionId },
+          },
+        }
+      })
+      return allowed;
+    } catch (error) {
+      throw error;
+    }
+  }
+  async addPathForbidden(auctionId: string, body: AddPathDto) {
+    try {
+      const forbidden = await this.prismaService.forbiddenRoute.create({
+        data: {
+          ...body,
+          auction: {
+            connect: { id: auctionId },
+          },
+        }
+      })
+      return forbidden;
+    } catch (error) {
+      throw error;
+    }
+  }
+  async deletePathAllowed(allowedId: string) {
+    try {
+      await this.prismaService.allowedRoute.deleteMany({
+        where: {
+          id: allowedId
+        }
+      })
+      return { status: true }
+    } catch (error) {
+      throw error;
+    }
+  }
+  async deletePathForbidden(id: string) {
+    try {
+      await this.prismaService.forbiddenRoute.deleteMany({
+        where: {
+          id
+        }
+      })
+      return { status: true }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async deleteSelector(id: string) {
+    try {
+      await this.prismaService.forbiddenSelector.deleteMany({
+        where: {
+          id
+        }
+      })
+      return { status: true }
+    } catch (error) {
+      throw error;
+    }
+  }
+  async getForbiddenPath() {
+    try {
+      const paths = await this.prismaService.forbiddenRoute.findMany();
+      return paths;
+    } catch (error) {
+      throw error;
+    }
+  }
+  async getForbiddenSelector() {
+    try {
+      const selectors = await this.prismaService.forbiddenSelector.findMany();
+      return selectors;
+    } catch (error) {
+      throw error;
+    }
+  }
+  async getAllowedPath() {
+    try {
+      const paths = await this.prismaService.allowedRoute.findMany();
+      return paths;
+    } catch (error) {
+      throw error;
+    }
   }
 }

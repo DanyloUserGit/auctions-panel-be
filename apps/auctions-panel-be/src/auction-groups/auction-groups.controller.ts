@@ -18,13 +18,13 @@ export class AuctionGroupsController {
   constructor(private readonly auctionGroupsService: AuctionGroupsService) {}
 
   @Get('search')
-  @Public()
   search(@Query('q') query: string, @Req() req) {
     return this.auctionGroupsService.search({
       user: req.user,
       query,
     });
   }
+  
   @Post(':id/add-auction')
   @Public()
   @ApiBody({ type: AddAuctionSwaggerDto })
@@ -70,7 +70,7 @@ export class AuctionGroupsController {
   })
   create(@Body() createAuctionGroupDto: CreateAuctionGroupDto, @Req() req) {
     const data = CreateAuctionGroupSchema.parse(createAuctionGroupDto);
-    return this.auctionGroupsService.create({...data, groupAdmin:req.user.id});
+    return this.auctionGroupsService.create({...data, Admin:req.user.id});
   }
 
   @Get()

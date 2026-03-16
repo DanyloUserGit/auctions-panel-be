@@ -48,7 +48,7 @@ export class SessionDispatcherService {
 
         // 2. Обмеження прав доступу (Role-Based Access Control)
         if (userRole !== Roles.SuperAdmin) {
-            // Якщо це Admin (GroupAdmin), він бачить ТІЛЬКИ сесії своєї групи
+            // Якщо це Admin (Admin), він бачить ТІЛЬКИ сесії своєї групи
             if (!userGroupId) {
                 throw new ForbiddenException('Користувач не прив\'язаний до жодної групи');
             }
@@ -71,7 +71,6 @@ export class SessionDispatcherService {
             if (filters.endDate) where.createdAt.lte = new Date(filters.endDate);
         }
 
-        // Виконання запиту з пагінацією та підтягуванням зв'язків
         return this.prisma.session.findMany({
             where,
             skip: filters.skip ? Number(filters.skip) : 0,
@@ -80,7 +79,7 @@ export class SessionDispatcherService {
             include: {
                 auction: { select: { id: true, title: true } },
                 users: { select: { id: true, email: true, firstName: true, lastName: true } },
-                endedBy: { select: { id: true, email: true } }, // Щоб бачити, хто завершив
+                endedBy: { select: { id: true, email: true } }, 
             },
         });
     }

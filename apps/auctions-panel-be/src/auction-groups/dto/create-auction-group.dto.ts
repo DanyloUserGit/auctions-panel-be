@@ -6,8 +6,8 @@ export const CreateAuctionGroupSchema = z.object({
     message: 'Назва є обовʼязковою.',
   }),
   users: z.array(z.string().uuid({ message: 'UserId має бути валідним UUID.' })).optional(),
-  groupAdmin: z.string().uuid({
-    message: 'groupAdmin має бути валідним UUID.',
+  Admin: z.string().uuid({
+    message: 'Admin має бути валідним UUID.',
   }).optional(),
   auctions: z
     .array(
@@ -30,7 +30,7 @@ export class CreateAuctionGroupSwaggerDto {
     example: '550e8400-e29b-41d4-a716-446655440000',
     description: 'ID користувача, який є адміністратором групи',
   })
-  groupAdmin: string;
+  Admin: string;
     @ApiProperty({
     example: ['uuid-user-1', 'uuid-user-2'],
     required: false,

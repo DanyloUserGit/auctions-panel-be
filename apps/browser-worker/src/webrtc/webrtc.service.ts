@@ -8,11 +8,10 @@ import { BrowserService } from '../browser-worker.service';
 export class WebrtcService {
   private readonly logger = new Logger(WebrtcService.name);
 
-  // Тепер ми зберігаємо підключення та треки для КОЖНОГО КЛІЄНТА окремо
-  // Map<sessionId, Map<clientId, RTCPeerConnection>>
   private connections = new Map<string, Map<string, RTCPeerConnection>>();
   private videoTracks = new Map<string, Map<string, MediaStreamTrack>>();
 
+  // Ключі тепер: `${sessionId}_${clientId}` для абсолютної ізоляції
   private ffmpegProcesses = new Map<string, ChildProcess>();
   private udpSockets = new Map<string, dgram.Socket>();
 
@@ -20,7 +19,7 @@ export class WebrtcService {
 
   async handleOffer(
     sessionId: string,
-    clientId: string, // ДОДАНО ІДЕНТИФІКАТОР КЛІЄНТА
+    clientId: string,
     offer: any,
     viewport: { width: number; height: number },
     onIceCandidate: (candidate: any) => void
@@ -30,7 +29,6 @@ export class WebrtcService {
       icePortRange: [10000, 10050],
     });
 
-    // Ініціалізуємо Map для сесії, якщо його ще немає
     if (!this.connections.has(sessionId)) {
       this.connections.set(sessionId, new Map());
       this.videoTracks.set(sessionId, new Map());
@@ -47,7 +45,8 @@ export class WebrtcService {
             action.x = Math.round(action.x * viewport.width);
             action.y = Math.round(action.y * viewport.height);
           }
-          this.browserService.interact(sessionId, action);
+          // ОНОВЛЕНО: Передаємо clientId, щоб клікати по його власній вкладці
+          this.browserService.interact(sessionId, clientId, action);
         } catch (e) { }
       });
     });
@@ -56,35 +55,37 @@ export class WebrtcService {
       mimeType: 'video/VP8',
       clockRate: 90000,
       payloadType: 96,
-      rtcpFeedback: [
-        { type: 'nack' },
-        { type: 'nack', parameter: 'pli' },
-        { type: 'goog-remb' },
-      ],
       parameters: 'x-google-start-bitrate=1000',
     });
 
     const videoTrack = new MediaStreamTrack({ kind: 'video', codec });
     this.videoTracks.get(sessionId)!.set(clientId, videoTrack);
 
-    const transceiver = pc.addTransceiver(videoTrack, { direction: 'sendonly' });
-
-    transceiver.onTrack.subscribe((track) => {
-      track.onReceiveRtp.subscribe(() => { });
-    });
+    pc.addTransceiver(videoTrack, { direction: 'sendonly' });
 
     pc.onIceCandidate.subscribe((candidate) => {
-      if (candidate) onIceCandidate(candidate);
+      // 1. werift може відправити null, коли збір кандидатів закінчено
+      if (!candidate) return;
+
+      // 2. Правильно перетворюємо екземпляр класу в звичайний JSON-об'єкт
+      const candidateObj = candidate.toJSON ? candidate.toJSON() : JSON.parse(JSON.stringify(candidate));
+
+      // (Опціонально) Можеш просто логувати оригінального кандидата, щоб бачити, що генерує werift
+      if (candidateObj.candidate) {
+        this.logger.debug(`[WebRTC] Згенеровано кандидата: ${candidateObj.candidate}`);
+      }
+
+      // 3. Відправляємо оригінальний об'єкт без змін IP
+      onIceCandidate(candidateObj);
     });
 
     await pc.setRemoteDescription(offer);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+
     await new Promise<void>((resolve) => {
       if (pc.iceGatheringState === 'complete') return resolve();
-
       const timeout = setTimeout(resolve, 1500);
-
       pc.onicegatheringstatechange = () => {
         if (pc.iceGatheringState === 'complete') {
           clearTimeout(timeout);
@@ -93,98 +94,117 @@ export class WebrtcService {
       };
     });
 
-    // Запускаємо FFmpeg ЛИШЕ ЯКЩО він ще не запущений для цієї сесії
-    if (!this.ffmpegProcesses.has(sessionId)) {
-      this.startVideoStreaming(sessionId, viewport);
+    const clientKey = `${sessionId}_${clientId}`;
+
+    // 1. Запускаємо FFmpeg для цього конкретного клієнта
+    if (!this.ffmpegProcesses.has(clientKey)) {
+      this.startVideoStreaming(sessionId, clientId, viewport);
     }
 
-    if (!pc.localDescription) {
-      this.logger.warn(`[WebrtcService] localDescription відсутній, повертаємо базовий answer`);
-      return { type: answer.type, sdp: answer.sdp };
-    }
+    // 2. 🛑 ВИПРАВЛЕННЯ: Запускаємо Playwright АСИНХРОННО (без await!)
+    // Це дозволить миттєво повернути Answer клієнту, поки сторінка вантажиться
+    this.browserService.addClientPage(sessionId, clientId, (frameBuffer) => {
+      const ffmpegProcess = this.ffmpegProcesses.get(clientKey);
+      if (ffmpegProcess && ffmpegProcess.stdin && ffmpegProcess.stdin.writable) {
+        // Щоб FFmpeg не впав від переповнення буфера (EPIPE)
+        try {
+          ffmpegProcess.stdin.write(frameBuffer);
+        } catch (e) {
+          this.logger.debug(`Помилка запису кадру у FFmpeg: ${e.message}`);
+        }
+      }
+    }).catch(e => this.logger.error(`Помилка створення вкладки для ${clientId}:`, e));
 
-    // ✅ Повертаємо localDescription, який вже містить зібрані IP
-    // return {
-    //   type: pc.localDescription.type,
-    //   sdp: pc.localDescription.sdp,
-    // };
-
+    // 3. Миттєво повертаємо Answer, щоб WebRTC успішно з'єднався!
     return answer;
+
   }
 
-  private startVideoStreaming(sessionId: string, viewport: { width: number; height: number }) {
+  private startVideoStreaming(sessionId: string, clientId: string, viewport: { width: number; height: number }) {
     const port = Math.floor(Math.random() * (60000 - 50000) + 50000);
     const udpSocket = dgram.createSocket('udp4');
     udpSocket.bind(port);
 
-    // Роздаємо отриманий кадр ВСІМ клієнтам у цій сесії
+    const clientKey = `${sessionId}_${clientId}`;
+
     udpSocket.on('message', (buffer) => {
-      const tracks = this.videoTracks.get(sessionId);
-      if (tracks) {
-        tracks.forEach((track) => {
-          try {
-            track.writeRtp(buffer);
-          } catch (e) { }
-        });
+      const track = this.videoTracks.get(sessionId)?.get(clientId);
+      if (track) {
+        try { track.writeRtp(buffer); } catch (e) { }
       }
     });
 
-    this.udpSockets.set(sessionId, udpSocket);
-    const display = process.env.DISPLAY || ':99';
+    this.udpSockets.set(clientKey, udpSocket);
 
     const ffmpegCmd = spawn('ffmpeg', [
-      '-loglevel', 'debug',
-      '-f', 'x11grab',
-      '-s', `${viewport.width}x${viewport.height}`,
-      '-i', `${display}.0+0,0`,
-      // Обов'язково додаємо фільтр для парних пікселів (FFmpeg падає без цього на непарних екранах)
+      '-loglevel', 'error',     // Залишаємо error, щоб не спамити
+      '-f', 'image2pipe',
+      '-framerate', '30',       // Вказуємо, що на вхід йде 30 FPS
+      '-vcodec', 'mjpeg',
+      '-i', '-',
+      // ПОВЕРТАЄМО ФІЛЬТР ДЛЯ ПАРНИХ ПІКСЕЛІВ (ЖИТТЄВО ВАЖЛИВО ДЛЯ VP8)
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
       '-c:v', 'libvpx',
-      '-pix_fmt', 'yuv420p',
-      '-threads', '4',
+      '-b:v', '1.5M',
+      '-threads', '2',
       '-deadline', 'realtime',
       '-cpu-used', '8',
-      '-b:v', '2M',
-      '-g', '30', // Краще 30 (або як fps), а не 10
+      '-g', '30',
       '-keyint_min', '30',
-      '-payload_type', '96',        // 🛑 ПОВЕРНУТО
-      '-slice-max-size', '1200',    // 🛑 ПОВЕРНУТО (Життєво необхідно для WebRTC UDP)
+      '-payload_type', '96',
+      '-slice-max-size', '1200',
       '-f', 'rtp',
       `rtp://127.0.0.1:${port}`,
     ]);
 
-    // ffmpegCmd.stderr.on('data', (data) => {
-    //   this.logger.debug(`[FFmpeg ${sessionId}]: ${data.toString()}`);
-    // });
+    // ДОДАЄМО ЛОГУВАННЯ ПОМИЛОК FFMPEG!
+    ffmpegCmd.stderr.on('data', (data) => {
+      console.error(`[FFMPEG ERROR - ${clientId}]:`, data.toString());
+    });
 
-    this.ffmpegProcesses.set(sessionId, ffmpegCmd);
+    this.ffmpegProcesses.set(clientKey, ffmpegCmd);
   }
 
-  // ДОДАНО: Закриття з'єднання для ОДНОГО клієнта
+  // Закриття підключення одного клієнта
   async closeClientConnection(sessionId: string, clientId: string) {
     this.logger.log(`Відключення клієнта ${clientId} від сесії ${sessionId}`);
+    const clientKey = `${sessionId}_${clientId}`;
+
     const pc = this.connections.get(sessionId)?.get(clientId);
     if (pc) {
       await pc.close().catch(() => { });
       this.connections.get(sessionId)?.delete(clientId);
       this.videoTracks.get(sessionId)?.delete(clientId);
     }
-  }
 
-  // Повне закриття сесії (викликається, коли activeConnections = 0)
-  async closeConnection(sessionId: string) {
-    const ffmpegProcess = this.ffmpegProcesses.get(sessionId);
+    const ffmpegProcess = this.ffmpegProcesses.get(clientKey);
     if (ffmpegProcess) {
       ffmpegProcess.kill('SIGKILL');
-      this.ffmpegProcesses.delete(sessionId);
+      this.ffmpegProcesses.delete(clientKey);
     }
 
-    const udpSocket = this.udpSockets.get(sessionId);
+    const udpSocket = this.udpSockets.get(clientKey);
     if (udpSocket) {
       udpSocket.close();
-      this.udpSockets.delete(sessionId);
+      this.udpSockets.delete(clientKey);
     }
 
+    await this.browserService.removePageForClient(sessionId, clientId).catch(() => { });
+  }
+
+  async closeConnection(sessionId: string) {
+    for (const [key, process] of this.ffmpegProcesses.entries()) {
+      if (key.startsWith(`${sessionId}_`)) {
+        process.kill('SIGKILL');
+        this.ffmpegProcesses.delete(key);
+      }
+    }
+    for (const [key, socket] of this.udpSockets.entries()) {
+      if (key.startsWith(`${sessionId}_`)) {
+        socket.close();
+        this.udpSockets.delete(key);
+      }
+    }
     const clients = this.connections.get(sessionId);
     if (clients) {
       for (const [clientId, pc] of clients.entries()) {
@@ -194,12 +214,11 @@ export class WebrtcService {
       this.videoTracks.delete(sessionId);
     }
   }
+
   async addIceCandidate(sessionId: string, clientId: string, candidate: any) {
     const pc = this.connections.get(sessionId)?.get(clientId);
     if (pc && candidate) {
-      await pc.addIceCandidate(candidate).catch(e =>
-        this.logger.error(`Помилка додавання кандидата для клієнта ${clientId}`, e)
-      );
+      await pc.addIceCandidate(candidate).catch(() => { });
     }
   }
 }
