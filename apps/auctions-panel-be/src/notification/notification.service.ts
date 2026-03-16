@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { NotificationChannel } from '@prisma/client';
+import { NotificationChannel, Roles } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationGateway } from './notification.gateway';
@@ -58,12 +58,36 @@ export class NotificationService {
                 const newNotif = await this.prisma.notification.create({
                     data: { userId, type: typeName, message: content.body },
                 });
-                this.gateway.sendToUser(userId, {
-                    id: newNotif.id,
-                    type: typeName,
-                    message: content.body,
-                    createdAt: newNotif.createdAt
+                const allSuperAdmins = await this.prisma.user.findMany({
+                    where: { role: Roles.SuperAdmin }, select: {
+                        id: true
+                    }
                 });
+                const groups = await this.prisma.auctionGroup.findMany({
+                    where: {
+                        users: {
+                            some: {
+                                id: userId,
+                            },
+                        },
+                    },
+                    select: {
+                        AdminId: true
+                    }
+                })
+                const allUsers = [{ id: userId }, ...allSuperAdmins, ...groups.map((group) => { return { id: group.AdminId } })].map((item) => item.id);
+                allUsers.map((id) => {
+                    if (id) {
+                        setTimeout(() => {
+                            this.gateway.sendToUser(id, {
+                                id: newNotif.id,
+                                type: typeName,
+                                message: content.body,
+                                createdAt: newNotif.createdAt
+                            });
+                        }, 5000)
+                    }
+                })
             }
 
             // Email
