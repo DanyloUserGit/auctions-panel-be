@@ -67,7 +67,6 @@ export class AuthService {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-
     this.notificationService.notify(payload.id, "USER_LOGED_IN", {
       subject: "Новий вхід до системи",
       body: `Користувач ${payload.firstName} ${payload.lastName} увійшов в систему.`
@@ -114,6 +113,17 @@ export class AuthService {
   async logout(refreshToken: string) {
     if (!refreshToken) return;
 
+    const tokenRecord = await this.prisma.refreshToken.findUnique({
+      where: { token: refreshToken },
+      include: { user: true },
+    });
+
+    if (tokenRecord) {
+      this.notificationService.notify(tokenRecord.user.id, "USER_LOGED_OUT", {
+        subject: "Новий вхід до системи",
+        body: `Користувач ${tokenRecord.user.firstName} ${tokenRecord.user.lastName} вийшов з системи.`
+      }, false)
+    }
     await this.prisma.refreshToken.deleteMany({
       where: { token: refreshToken },
     });

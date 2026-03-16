@@ -42,19 +42,21 @@ export class NotificationService {
             where: { userId, notificationType: { name: typeName } },
             include: { user: true, notificationType: true }
         });
-
+        console.log("Setting: ", setting)
         if (!setting) return;
-
+        console.log("Setting end")
         const groupRequirement = setting.user.auctionGroupId
             ? await this.prisma.groupNotificationRequirement.findFirst({
                 where: { notificationTypeId: setting.notificationTypeId, groupId: setting.user.auctionGroupId }
             }) : null;
 
         const isMandatory = groupRequirement?.isMandatory || false;
-
+            console.log("isMandatory")
         if (setting.isEnabled || isMandatory) {
+            
             // In-App
             if (setting.channels.includes(NotificationChannel.InApp)) {
+                console.log("IN-APP")
                 const newNotif = await this.prisma.notification.create({
                     data: { userId, type: typeName, message: content.body },
                 });
@@ -75,7 +77,8 @@ export class NotificationService {
                         AdminId: true
                     }
                 })
-                const allUsers = [{ id: userId }, ...allSuperAdmins, ...groups.map((group) => { return { id: group.AdminId } })].map((item) => item.id);
+                const allUsers = [{ id: userId }, ...allSuperAdmins.filter((item)=>item.id!==userId), ...groups.filter((item)=>item.AdminId!==userId).map((group) => { return { id: group.AdminId } })].map((item) => item.id);
+                console.log("allUsers: ", allUsers)
                 allUsers.map((id) => {
                     if (id) {
                         setTimeout(() => {
@@ -85,6 +88,12 @@ export class NotificationService {
                                 message: content.body,
                                 createdAt: newNotif.createdAt
                             });
+                            console.log(id, {
+                                id: newNotif.id,
+                                type: typeName,
+                                message: content.body,
+                                createdAt: newNotif.createdAt
+                            })
                         }, 5000)
                     }
                 })
@@ -200,6 +209,7 @@ export class NotificationService {
             { name: 'ADDED_TO_GROUP', description: 'Сповіщення про додавання користувача до нової групи' },
             { name: 'WORKER_ERROR', description: 'Критичні сповіщення про помилки в роботі воркерів' },
             { name: 'USER_LOGED_IN', description: 'Користувач увійшов до системи' },
+            { name: 'USER_LOGED_OUT', description: 'Користувач вийшов з системи' },
         ];
 
         let processedCount = 0;
