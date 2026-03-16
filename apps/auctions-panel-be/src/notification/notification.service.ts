@@ -37,7 +37,7 @@ export class NotificationService {
         }));
     }
 
-    async notify(userId: string, typeName: string, content: { subject: string; body: string }) {
+    async notify(userId: string, typeName: string, content: { subject: string; body: string }, sendEmail?: boolean) {
         const setting = await this.prisma.userNotificationSetting.findFirst({
             where: { userId, notificationType: { name: typeName } },
             include: { user: true, notificationType: true }
@@ -67,7 +67,7 @@ export class NotificationService {
             }
 
             // Email
-            if (setting.channels.includes(NotificationChannel.Email) && setting.user.email) {
+            if (sendEmail && setting.channels.includes(NotificationChannel.Email) && setting.user.email) {
                 await this.mailService.send(setting.user.email, content.subject, content.body);
             }
 
@@ -175,6 +175,7 @@ export class NotificationService {
             { name: 'AUCTION_ENDED', description: 'Сповіщення про завершення аукціону' },
             { name: 'ADDED_TO_GROUP', description: 'Сповіщення про додавання користувача до нової групи' },
             { name: 'WORKER_ERROR', description: 'Критичні сповіщення про помилки в роботі воркерів' },
+            { name: 'USER_LOGED_IN', description: 'Користувач увійшов до системи' },
         ];
 
         let processedCount = 0;
