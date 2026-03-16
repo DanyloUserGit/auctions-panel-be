@@ -17,6 +17,7 @@ import { ProfileModule } from './profile/profile.module';
 import { NotificationModule } from './notification/notification.module';
 import { TrainingModule } from './training/training.module';
 import { SessionLoggerModule } from './session-logger/session-logger.module';
+import { GlobalSettingsModule } from './global-settings/global-settings.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { SessionLoggerModule } from './session-logger/session-logger.module';
     NotificationModule,
     TrainingModule,
     SessionLoggerModule,
+    GlobalSettingsModule,
   ],
   providers: [
     {
