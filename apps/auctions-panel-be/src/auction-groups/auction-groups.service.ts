@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Roles } from '@prisma/client';
+import { Roles, User } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAuctionGroupDto } from './dto/create-auction-group.dto';
@@ -9,8 +9,15 @@ import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
 export class AuctionGroupsService {
   constructor(private prisma: PrismaService) { }
 
-  async create(createAuctionGroupDto: CreateAuctionGroupDto) {
+  async create(createAuctionGroupDto: CreateAuctionGroupDto, user: User) {
     const { auctions, Admin, users, ...rest } = createAuctionGroupDto;
+
+    const isSuperAdmin = user?.role === Roles.SuperAdmin;
+
+    if (!isSuperAdmin) {
+      delete createAuctionGroupDto.sessionLimit;
+      delete createAuctionGroupDto.canGaManageAccounts;
+    }
 
     return await this.prisma.auctionGroup.create({
       data: {
@@ -38,13 +45,17 @@ export class AuctionGroupsService {
   async findAll(user?: { id: string; role: Roles }) {
     if (!user?.id) return [];
 
-    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+    const isSuperAdmin = user?.role === Roles.SuperAdmin;
+    const isGroupAdmin = user?.role === Roles.Admin;
 
-    if (isAdmin) {
+    if (isSuperAdmin) {
+      return this.prisma.auctionGroup.findMany({ include: { auctions: true } });
+    }
+
+    if (isGroupAdmin) {
       return this.prisma.auctionGroup.findMany({
-        include: {
-          auctions: true,
-        },
+        where: { Admin: { id: user.id } },
+        include: { auctions: true }
       });
     }
 
@@ -136,8 +147,15 @@ export class AuctionGroupsService {
     return group;
   }
 
-  async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto) {
+  async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto, user: User) {
     const { auctions, Admin, users, ...rest } = updateAuctionGroupDto;
+
+    const isSuperAdmin = user?.role === Roles.SuperAdmin;
+
+    if (!isSuperAdmin) {
+      delete updateAuctionGroupDto.sessionLimit;
+      delete updateAuctionGroupDto.canGaManageAccounts;
+    }
 
     return await this.prisma.auctionGroup.update({
       where: { id },
@@ -211,13 +229,13 @@ export class AuctionGroupsService {
       orderBy: { title: 'asc' },
     });
   }
-  async addAuction(groupId: string, userId: string) {
+  async addAuction(groupId: string, auctionId: string) {
     const group = await this.prisma.auctionGroup.findUnique({
       where: { id: groupId },
       include: { auctions: true },
     });
 
-    const alreadyAdded = group?.auctions.some((u) => u.id === userId);
+    const alreadyAdded = group?.auctions.some((u) => u.id === auctionId);
 
     if (alreadyAdded) return group;
 
@@ -225,7 +243,7 @@ export class AuctionGroupsService {
       where: { id: groupId },
       data: {
         auctions: {
-          connect: { id: userId },
+          connect: { id: auctionId },
         },
       },
     });
@@ -253,6 +271,19 @@ export class AuctionGroupsService {
           disconnect: { id: userId },
         },
       },
+    });
+  }
+  
+  async grantAccountAccess(groupId: string, userId: string) {
+    return await this.prisma.auctionGroup.update({
+      where: { id: groupId },
+      data: { accounts: { connect: { id: userId } } },
+    });
+  }
+  async revokeAccountAccess(groupId: string, userId: string) {
+    return await this.prisma.auctionGroup.update({
+      where: { id: groupId },
+      data: { accounts: { disconnect: { id: userId } } },
     });
   }
 }

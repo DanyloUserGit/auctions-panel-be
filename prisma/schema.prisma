@@ -83,6 +83,7 @@ model User {
   trainingMaterials        TrainingMaterial[]
   terminatedSessions       Session[]                 @relation("SessionTerminator")
   sessionLogs              SessionLog[]
+  accessibleGroupAccounts  AuctionGroup[]            @relation("GroupAccountAccess")
 
   @@map("users")
 }
@@ -243,8 +244,14 @@ model Auction {
 }
 
 model AuctionGroup {
-  id       String    @id @default(uuid()) @db.Uuid()
-  title    String
+  id    String @id @default(uuid()) @db.Uuid()
+  title String
+
+  sessionLimit        Int     @default(0)
+  canGaManageAccounts Boolean @default(false)
+  rules               Json?   @default("{}")
+  accounts            User[]  @relation("GroupAccountAccess")
+
   auctions Auction[]
   sessions Session[]
 

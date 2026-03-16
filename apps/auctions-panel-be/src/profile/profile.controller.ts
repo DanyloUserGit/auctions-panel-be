@@ -1,19 +1,18 @@
 import { Body, Controller, Param, Patch, Post, Req } from '@nestjs/common';
-import {
-  type EditProfileDto,
-  EditProfileSchema,
-  EditProfileSwaggerDto,
-} from './dto/EditProfileDto.dto';
 import { ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
+import { MailService } from '../mail/mail.service';
+import { type ChangePasswordDto, ChangePasswordSchema } from './dto/ChangePasswordDto.dto';
 import {
   type ChangeRoleDto,
   ChangeRoleSchema,
   ChangeRoleSwaggerDto,
 } from './dto/ChangeRoleDto.dto';
-import { ChangePasswordSchema, type ChangePasswordDto } from './dto/ChangePasswordDto.dto';
+import {
+  type EditProfileDto,
+  EditProfileSchema,
+  EditProfileSwaggerDto,
+} from './dto/EditProfileDto.dto';
 import { ProfileService } from './profile.service';
-import { MailService } from '../mail/mail.service';
-import { Public } from '../decorators/public.decorator';
 
 @Controller('profile')
 export class ProfileController {

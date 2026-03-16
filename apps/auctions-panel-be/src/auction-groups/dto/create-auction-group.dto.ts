@@ -9,6 +9,7 @@ export const CreateAuctionGroupSchema = z.object({
   Admin: z.string().uuid({
     message: 'Admin має бути валідним UUID.',
   }).optional(),
+
   auctions: z
     .array(
       z.string().uuid({
@@ -16,6 +17,9 @@ export const CreateAuctionGroupSchema = z.object({
       })
     )
     .optional(),
+  sessionLimit: z.int({ message: "sessionLimit має бути цілим числом." }).optional(),
+  canGaManageAccounts: z.boolean({ message: "canGaManageAccounts має бути цілим true/false." }).optional(),
+  rules: z.string({ message: "rules має бути формату json." }).optional()
 });
 
 export type CreateAuctionGroupDto = z.infer<typeof CreateAuctionGroupSchema>;
@@ -31,7 +35,7 @@ export class CreateAuctionGroupSwaggerDto {
     description: 'ID користувача, який є адміністратором групи',
   })
   Admin: string;
-    @ApiProperty({
+  @ApiProperty({
     example: ['uuid-user-1', 'uuid-user-2'],
     required: false,
     description: 'Масив ID користувачів',
@@ -43,4 +47,22 @@ export class CreateAuctionGroupSwaggerDto {
     description: 'Масив ID аукціонів',
   })
   auctions?: string[];
+  @ApiProperty({
+    example: '10',
+    required: false,
+    description: 'Ліміт сесій на групу.',
+  })
+  sessionLimit?: number;
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'Чи може адмін групи керувати акаунтами.',
+  })
+  canGaManageAccounts?: boolean;
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'Правила заборон для групи формат json',
+  })
+  rules?: string;
 }

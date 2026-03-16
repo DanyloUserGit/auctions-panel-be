@@ -11,11 +11,10 @@ import {
   UpdateAuctionGroupSchema,
   type UpdateAuctionGroupDto,
 } from './dto/update-auction-group.dto';
-import { Public } from '../decorators/public.decorator';
 
 @Controller('auction-groups')
 export class AuctionGroupsController {
-  constructor(private readonly auctionGroupsService: AuctionGroupsService) {}
+  constructor(private readonly auctionGroupsService: AuctionGroupsService) { }
 
   @Get('search')
   search(@Query('q') query: string, @Req() req) {
@@ -24,9 +23,18 @@ export class AuctionGroupsController {
       query,
     });
   }
-  
+
+  @Post(':id/grant-account-access')
+  grantAccountAccess(@Param('id') groupId: string, @Body() body: { userId: string }) {
+    return this.auctionGroupsService.grantAccountAccess(groupId, body.userId);
+  }
+
+  @Delete(':id/revoke-account-access/:userId')
+  revokeAccountAccess(@Param('id') groupId: string, @Param('userId') userId: string) {
+    return this.auctionGroupsService.revokeAccountAccess(groupId, userId);
+  }
+
   @Post(':id/add-auction')
-  @Public()
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -39,7 +47,7 @@ export class AuctionGroupsController {
     return this.auctionGroupsService.addAuction(auctionId, data.auctionId);
   }
   @Delete(':id/remove-user')
-  @Public()
+
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -52,7 +60,7 @@ export class AuctionGroupsController {
     return this.auctionGroupsService.removeAuction(auctionId, data.auctionId);
   }
   @Post()
-  // @Public()
+  // 
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -70,7 +78,7 @@ export class AuctionGroupsController {
   })
   create(@Body() createAuctionGroupDto: CreateAuctionGroupDto, @Req() req) {
     const data = CreateAuctionGroupSchema.parse(createAuctionGroupDto);
-    return this.auctionGroupsService.create({...data, Admin:req.user.id});
+    return this.auctionGroupsService.create({ ...data }, req.user);
   }
 
   @Get()
@@ -84,7 +92,6 @@ export class AuctionGroupsController {
   }
 
   @Patch(':id')
-  @Public()
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -100,9 +107,9 @@ export class AuctionGroupsController {
       ],
     },
   })
-  update(@Param('id') id: string, @Body() updateAuctionGroupDto: UpdateAuctionGroupDto) {
+  update(@Param('id') id: string, @Body() updateAuctionGroupDto: UpdateAuctionGroupDto, @Req() req) {
     const data = UpdateAuctionGroupSchema.parse(updateAuctionGroupDto);
-    return this.auctionGroupsService.update(id, data);
+    return this.auctionGroupsService.update(id, data, req.user);
   }
 
   @Delete(':id')

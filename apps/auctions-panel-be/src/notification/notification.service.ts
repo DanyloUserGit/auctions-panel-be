@@ -51,9 +51,9 @@ export class NotificationService {
             }) : null;
 
         const isMandatory = groupRequirement?.isMandatory || false;
-            console.log("isMandatory")
+        console.log("isMandatory")
         if (setting.isEnabled || isMandatory) {
-            
+
             // In-App
             if (setting.channels.includes(NotificationChannel.InApp)) {
                 console.log("IN-APP")
@@ -77,7 +77,7 @@ export class NotificationService {
                         AdminId: true
                     }
                 })
-                const allUsers = [{ id: userId }, ...allSuperAdmins.filter((item)=>item.id!==userId), ...groups.filter((item)=>item.AdminId!==userId).map((group) => { return { id: group.AdminId } })].map((item) => item.id);
+                const allUsers = [{ id: userId }, ...allSuperAdmins.filter((item) => item.id !== userId), ...groups.filter((item) => item.AdminId !== userId).map((group) => { return { id: group.AdminId } })].map((item) => item.id);
                 console.log("allUsers: ", allUsers)
                 allUsers.map((id) => {
                     if (id) {
@@ -205,6 +205,7 @@ export class NotificationService {
         const types = [
             { name: 'SESSION_STARTED', description: 'Сповіщення про успішний запуск сесії для аукціону' },
             { name: 'SESSION_EXPIRING', description: 'Попередження про те, що час активної сесії скоро закінчиться' },
+            { name: 'SESSION_ENDED', description: 'Попередження про те, що активна сесія закінчилася' },
             { name: 'AUCTION_ENDED', description: 'Сповіщення про завершення аукціону' },
             { name: 'ADDED_TO_GROUP', description: 'Сповіщення про додавання користувача до нової групи' },
             { name: 'WORKER_ERROR', description: 'Критичні сповіщення про помилки в роботі воркерів' },

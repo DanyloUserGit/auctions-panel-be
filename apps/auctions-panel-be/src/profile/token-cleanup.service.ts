@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { ProfileService } from './profile.service';
-import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class TokenCleanupService {
-  constructor(private profileService: ProfileService) {}
+  constructor(private profileService: ProfileService) { }
 
   @Cron('*/2 * * * *')
   async handleCleanup() {
-    const result = await this.profileService.cleanExpiredTokens();
+    await this.profileService.cleanExpiredTokens();
   }
 }
