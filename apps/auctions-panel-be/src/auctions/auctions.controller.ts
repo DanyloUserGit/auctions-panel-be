@@ -143,7 +143,7 @@ export class AuctionsController {
     return this.auctionsService.create(data);
   }
 
-  @Get(':groupId')
+  @Get('group/:groupId')
   findAll(@Req() req, @Param('groupId') groupId: string) {
     return this.auctionsService.findAll(groupId, req.user);
   }
