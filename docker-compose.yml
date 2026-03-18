@@ -19,12 +19,28 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
 
+  mysql-client:
+    image: mariadb:10.5
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_TABLE_EXTOURCARS1_PASS}
+      MYSQL_DATABASE: table_extourcars1
+      # MYSQL_USER: root
+      # MYSQL_PASSWORD: ${DB_TABLE_EXTOURCARS1_PASS}
+    ports:
+      - "3307:3306"
+    volumes:
+      - client_mysql_data:/var/lib/mysql
+
+      - ./table_extourcars1.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: always
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     depends_on:
       - rabbitmq
+      - mysql-client
     volumes:
       - ./apps/auctions-panel-be/.env:/app/.env
     env_file:
@@ -52,3 +68,4 @@ services:
       - "10000-10050:10000-10050/udp"
 volumes:
   postgres_data:
+  client_mysql_data:

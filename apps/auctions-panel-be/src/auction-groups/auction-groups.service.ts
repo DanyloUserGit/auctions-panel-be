@@ -22,9 +22,11 @@ export class AuctionGroupsService {
     return await this.prisma.auctionGroup.create({
       data: {
         ...rest,
-        Admin: {
-          connect: { id: Admin },
-        },
+        ...(Admin && {
+          Admin: {
+            connect: { id: Admin },
+          },
+        }),
         ...(users && {
           users: {
             connect: users.map((id) => ({ id })),
@@ -81,6 +83,7 @@ export class AuctionGroupsService {
             },
           },
         },
+        accounts: true
       },
     });
   }
@@ -105,6 +108,7 @@ export class AuctionGroupsService {
               },
             },
           },
+          accounts: true
         },
       });
 
@@ -225,6 +229,7 @@ export class AuctionGroupsService {
               },
             },
           },
+        accounts: true
       },
       orderBy: { title: 'asc' },
     });
@@ -273,7 +278,7 @@ export class AuctionGroupsService {
       },
     });
   }
-  
+
   async grantAccountAccess(groupId: string, userId: string) {
     return await this.prisma.auctionGroup.update({
       where: { id: groupId },
