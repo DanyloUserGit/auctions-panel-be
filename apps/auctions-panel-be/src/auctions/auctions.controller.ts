@@ -25,19 +25,19 @@ export class AuctionsController {
     });
   }
 
-  @Get('forbidden-paths')
-  getForbiddenPath() {
-    return this.auctionsService.getForbiddenPath();
+  @Get(':id/forbidden-paths')
+  getForbiddenPath(@Param('id') auctionId: string) {
+    return this.auctionsService.getForbiddenPath(auctionId);
   }
 
-  @Get('forbidden-selectors')
-  getForbiddenSelector() {
-    return this.auctionsService.getForbiddenSelector();
+  @Get(':id/forbidden-selectors')
+  getForbiddenSelector(@Param('id') auctionId: string) {
+    return this.auctionsService.getForbiddenSelector(auctionId);
   }
 
-  @Get('allowed-paths')
-  getAllowedPath() {
-    return this.auctionsService.getAllowedPath();
+  @Get(':id/allowed-paths')
+  getAllowedPath(@Param('id') auctionId: string) {
+    return this.auctionsService.getAllowedPath(auctionId);
   }
 
   @Post(':id/add-user')
