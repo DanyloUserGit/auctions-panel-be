@@ -21,6 +21,7 @@ import { GlobalSettingsModule } from './global-settings/global-settings.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { ClientDbModule } from './client-db/client-db.module';
 import { CalculationModule } from './calculation/calculation.module';
+import { BalanceModule } from './balance/balance.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { CalculationModule } from './calculation/calculation.module';
     AuditLogModule,
     ClientDbModule,
     CalculationModule,
+    BalanceModule,
   ],
   providers: [
     {
