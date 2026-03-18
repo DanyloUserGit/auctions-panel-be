@@ -1,14 +1,14 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { encryptData } from '../utils/encrypt';
+import { hashPassword } from '../utils/password';
 import { CreateAuctionAuthDto } from './dto/create-auction-auth.dto';
 import { UpdateAuctionAuthDto } from './dto/update-auction-auth.dto';
-import { hashPassword } from '../utils/password';
-import { encryptData } from '../utils/encrypt';
 
 @Injectable()
 export class AuctionAuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async create(dto: CreateAuctionAuthDto) {
     const hashedPassword = encryptData(dto.password);
@@ -34,6 +34,63 @@ export class AuctionAuthService {
       where: { auctionId },
       orderBy: { email: 'asc' },
     });
+  }
+
+  async selectAccount(accountId: string, userId: string) {
+    try {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { selectedAccounts: true } });
+      if (!user) throw new NotFoundException("Користувача не знайдено");
+
+      const alreadyAdded = user.selectedAccounts.some((u) => u.id === accountId);
+
+      if (alreadyAdded) return { status: true };
+
+      return await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          selectedAccounts: {
+            connect: { id: accountId },
+          },
+        },
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async removeAccount(accountId: string, userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { selectedAccounts: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Користувача не знайдено');
+    }
+
+    const isAttached = user.selectedAccounts.some((u) => u.id === accountId);
+
+    if (!isAttached) {
+      return { status: true };
+    }
+
+    return await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        selectedAccounts: {
+          disconnect: { id: accountId },
+        },
+      },
+    });
+  }
+
+  async getSelectedAccounts(userId: string) {
+    try {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { selectedAccounts: true } });
+      return user?.selectedAccounts ?? [];
+    } catch (error) {
+      throw error;
+    }
   }
 
   async findOne(id: string) {
