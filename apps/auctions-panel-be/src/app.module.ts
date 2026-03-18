@@ -18,6 +18,7 @@ import { NotificationModule } from './notification/notification.module';
 import { TrainingModule } from './training/training.module';
 import { SessionLoggerModule } from './session-logger/session-logger.module';
 import { GlobalSettingsModule } from './global-settings/global-settings.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { GlobalSettingsModule } from './global-settings/global-settings.module';
     TrainingModule,
     SessionLoggerModule,
     GlobalSettingsModule,
+    AuditLogModule,
   ],
   providers: [
     {

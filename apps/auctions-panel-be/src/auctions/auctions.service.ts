@@ -350,25 +350,25 @@ export class AuctionsService {
       throw error;
     }
   }
-  async getForbiddenPath() {
+  async getForbiddenPath(id: string) {
     try {
-      const paths = await this.prismaService.forbiddenRoute.findMany();
+      const paths = await this.prismaService.forbiddenRoute.findMany({ where: { auctionId: id } });
       return paths;
     } catch (error) {
       throw error;
     }
   }
-  async getForbiddenSelector() {
+  async getForbiddenSelector(id: string) {
     try {
-      const selectors = await this.prismaService.forbiddenSelector.findMany();
+      const selectors = await this.prismaService.forbiddenSelector.findMany({ where: { auctionId: id } });
       return selectors;
     } catch (error) {
       throw error;
     }
   }
-  async getAllowedPath() {
+  async getAllowedPath(id: string) {
     try {
-      const paths = await this.prismaService.allowedRoute.findMany();
+      const paths = await this.prismaService.allowedRoute.findMany({ where: { auctionId: id } });
       return paths;
     } catch (error) {
       throw error;
