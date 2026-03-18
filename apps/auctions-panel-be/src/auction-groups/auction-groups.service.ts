@@ -51,13 +51,13 @@ export class AuctionGroupsService {
     const isGroupAdmin = user?.role === Roles.Admin;
 
     if (isSuperAdmin) {
-      return this.prisma.auctionGroup.findMany({ include: { auctions: true } });
+      return this.prisma.auctionGroup.findMany({ include: { auctions: true, accounts: true } });
     }
 
     if (isGroupAdmin) {
       return this.prisma.auctionGroup.findMany({
         where: { Admin: { id: user.id } },
-        include: { auctions: true }
+        include: { auctions: true, accounts: true }
       });
     }
 
@@ -93,30 +93,18 @@ export class AuctionGroupsService {
       throw new ForbiddenException('Потрібна авторизація');
     }
 
-    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+    const isSuperAdmin = user?.role === Roles.SuperAdmin;
+    const isGroupAdmin = user?.role === Roles.Admin;
 
-    if (isAdmin) {
-      const auction = await this.prisma.auctionGroup.findUnique({
-        where: { id },
-        include: {
-          auctions: {
-            where: {
-              users: {
-                some: {
-                  id: user.id,
-                },
-              },
-            },
-          },
-          accounts: true
-        },
+    if (isSuperAdmin) {
+      return this.prisma.auctionGroup.findMany({ where: { id }, include: { auctions: true } });
+    }
+
+    if (isGroupAdmin) {
+      return this.prisma.auctionGroup.findMany({
+        where: { id, Admin: { id: user.id } },
+        include: { auctions: true }
       });
-
-      if (!auction) {
-        throw new NotFoundException('Група аукціонів не знайдена');
-      }
-
-      return auction;
     }
     const group = await this.prisma.auctionGroup.findFirst({
       where: {
