@@ -93,11 +93,11 @@ export class TrainingService {
         if (!material) throw new NotFoundException('Матеріал не знайдено');
 
         if (user.role !== Roles.SuperAdmin) {
-            const groupAdminInfo = await this.prisma.auctionGroup.findUnique({
-                where: { groupAdminId: user.id }
+            const AdminInfo = await this.prisma.auctionGroup.findUnique({
+                where: { AdminId: user.id }
             });
 
-            if (!groupAdminInfo || material.groupId !== groupAdminInfo.id) {
+            if (!AdminInfo || material.groupId !== AdminInfo.id) {
                 throw new ForbiddenException('Ви можете редагувати лише матеріали своєї групи');
             }
         }
@@ -157,21 +157,21 @@ export class TrainingService {
 
     async createTrainingMaterial(user: User, data: CreateTrainingDto) {
         const isSuperAdmin = user.role === Roles.SuperAdmin;
-        const groupAdminInfo = await this.prisma.auctionGroup.findUnique({
-            where: { groupAdminId: user.id }
+        const AdminInfo = await this.prisma.auctionGroup.findUnique({
+            where: { AdminId: user.id }
         });
-        const isGroupAdmin = !!groupAdminInfo;
+        const isAdmin = !!AdminInfo;
 
-        if (!isSuperAdmin && !isGroupAdmin) {
+        if (!isSuperAdmin && !isAdmin) {
             throw new ForbiddenException('Тільки адміністратори можуть створювати матеріали');
         }
-        if (!groupAdminInfo) {
+        if (!AdminInfo) {
             throw new ForbiddenException('Групи відсутні у адміністратора');
         } else {
             const finalData = {
                 ...data,
                 authorId: user.id,
-                groupId: isSuperAdmin ? data.groupId : groupAdminInfo.id,
+                groupId: isSuperAdmin ? data.groupId : AdminInfo.id,
                 visibility: isSuperAdmin ? (data.visibility || MaterialVisibility.All) : MaterialVisibility.Group,
             };
             return this.prisma.trainingMaterial.create({ data: finalData });

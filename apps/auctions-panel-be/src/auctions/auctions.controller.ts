@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, ApiQuery, getSchemaPath } from '@nestjs/swagger';
 import { AuctionsService } from './auctions.service';
+import { AddPathSchema, AddPathSwaggerDto, type AddPathDto } from './dto/add-path.dto';
+import { AddSelectorSchema, AddSelectorSwaggerDto, type AddSelectorDto } from './dto/add-selector.dto';
 import { AddUserSchema, AddUserSwaggerDto, type AddUserDto } from './dto/add-user.dto';
 import {
   CreateAuctionSchema,
@@ -8,11 +10,10 @@ import {
   type CreateAuctionDto,
 } from './dto/create-auction.dto';
 import { UpdateAuctionSchema, type UpdateAuctionDto } from './dto/update-auction.dto';
-import { Public } from '../decorators/public.decorator';
 
 @Controller('auctions')
 export class AuctionsController {
-  constructor(private readonly auctionsService: AuctionsService) {}
+  constructor(private readonly auctionsService: AuctionsService) { }
 
   @Get('search')
   @ApiQuery({ name: 'auctionGroupId', required: false, type: String })
@@ -24,11 +25,25 @@ export class AuctionsController {
     });
   }
 
+  @Get(':id/forbidden-paths')
+  getForbiddenPath(@Param('id') auctionId: string) {
+    return this.auctionsService.getForbiddenPath(auctionId);
+  }
+
+  @Get(':id/forbidden-selectors')
+  getForbiddenSelector(@Param('id') auctionId: string) {
+    return this.auctionsService.getForbiddenSelector(auctionId);
+  }
+
+  @Get(':id/allowed-paths')
+  getAllowedPath(@Param('id') auctionId: string) {
+    return this.auctionsService.getAllowedPath(auctionId);
+  }
+
   @Post(':id/add-user')
-  @Public()
   @ApiBody({ type: AddUserSwaggerDto })
   @ApiCreatedResponse({
-    description: 'User successfully created',
+    description: 'User successfully added',
     schema: {
       allOf: [{ $ref: getSchemaPath(AddUserSwaggerDto) }],
     },
@@ -37,8 +52,63 @@ export class AuctionsController {
     const data = AddUserSchema.parse(body);
     return this.auctionsService.addUser(auctionId, data.userId);
   }
+
+  @Post(':id/selector')
+  @ApiBody({ type: AddSelectorSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'Selector is now forbidden',
+  })
+  addSelector(@Param('id') auctionId: string, @Body() body: AddSelectorDto) {
+    const data = AddSelectorSchema.parse(body);
+    return this.auctionsService.addSelector(auctionId, data);
+  }
+
+  @Post(':id/allowed')
+  @ApiBody({ type: AddPathSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'Path is allowed',
+  })
+  addPathAllowed(@Param('id') auctionId: string, @Body() body: AddPathDto) {
+    const data = AddPathSchema.parse(body);
+    return this.auctionsService.addPathAllowed(auctionId, data);
+  }
+
+  @Post(':id/forbidden')
+  @ApiBody({ type: AddPathSwaggerDto })
+  @ApiCreatedResponse({
+    description: 'Path is allowed',
+  })
+  addPathForbidden(@Param('id') auctionId: string, @Body() body: AddPathDto) {
+    const data = AddPathSchema.parse(body);
+    return this.auctionsService.addPathForbidden(auctionId, data);
+  }
+
+  @Delete('remove-allowed-path/:id')
+  @ApiCreatedResponse({
+    description: 'Path deleted',
+  })
+  deletePathAllowed(@Param('id') id: string) {
+    return this.auctionsService.deletePathAllowed(id);
+  }
+
+  @Delete('remove-forbidden-path/:id')
+  @ApiCreatedResponse({
+    description: 'Path deleted',
+  })
+  deletePathForbidden(@Param('id') id: string) {
+    return this.auctionsService.deletePathForbidden(id);
+  }
+
+  @Delete('remove-forbidden-selector/:id')
+  @ApiCreatedResponse({
+    description: 'Path deleted',
+  })
+  deleteSelectorForbidden(@Param('id') id: string) {
+    return this.auctionsService.deleteSelector(id);
+  }
+
+
   @Delete(':id/remove-user')
-  @Public()
   @ApiBody({ type: AddUserSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -52,7 +122,7 @@ export class AuctionsController {
   }
 
   @Post()
-  @Public()
+
   @ApiBody({ type: CreateAuctionSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -73,7 +143,7 @@ export class AuctionsController {
     return this.auctionsService.create(data);
   }
 
-  @Get(':groupId')
+  @Get('group/:groupId')
   findAll(@Req() req, @Param('groupId') groupId: string) {
     return this.auctionsService.findAll(groupId, req.user);
   }
@@ -84,7 +154,7 @@ export class AuctionsController {
   }
 
   @Patch(':id')
-  @Public()
+
   @ApiBody({ type: CreateAuctionSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -105,7 +175,7 @@ export class AuctionsController {
     return this.auctionsService.update(id, data);
   }
 
-  @Public()
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.auctionsService.remove(id);

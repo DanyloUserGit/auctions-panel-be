@@ -10,6 +10,7 @@ import { Roles, Session, SessionEventType, SessionRights } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptData } from '../utils/encrypt';
 import { SessionLoggerService } from '../session-logger/session-logger.service';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class SessionsService implements OnModuleInit {
@@ -17,7 +18,8 @@ export class SessionsService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
     @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy,
-    private loggerService: SessionLoggerService
+    private loggerService: SessionLoggerService,
+    private notificationService: NotificationService
   ) { }
 
   async onModuleInit() {
@@ -42,6 +44,57 @@ export class SessionsService implements OnModuleInit {
       },
     });
   }
+
+  async terminateExpiredSessions() {
+    try {
+      const expiredSessions = await this.prisma.session.findMany({
+        where: { expiresAt: { lt: new Date() }, isActive: true },
+        include: {
+          auction: true,
+          account: true,
+          users: true,
+        },
+      });
+
+      if (expiredSessions.length === 0) return; 
+      await this.prisma.session.updateMany({
+        where: { id: { in: expiredSessions.map(s => s.id) } },
+        data: {
+          isActive: false,
+          activeConnections: 0,
+          endedAt: new Date(),
+        },
+      });
+
+      for (const session of expiredSessions) {
+        await this.loggerService.logEvent({
+          sessionId: session.id,
+          eventType: SessionEventType.Other,
+          severity: 'Info',
+          message: 'Сесія була автоматично завершена по таймеру',
+          isIncident: false,
+        });
+
+        if (session.users && session.users.length > 0) {
+          const notifyPromises = session.users.map((user) =>
+            this.notificationService.notify(
+              user.id,
+              "SESSION_ENDED",
+              {
+                subject: "Час сесії вичерпано",
+                body: `Час сесії вичерпано. \nСесія для аукціону ${session.auction.title} (акаунт ${session.account.email}) була автоматично завершена.`
+              },
+              false
+            )
+          );
+          await Promise.all(notifyPromises);
+        }
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async terminateSession(sessionId: string, adminId: string) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
@@ -82,6 +135,15 @@ export class SessionsService implements OnModuleInit {
       message: 'Сесія була примусово завершена диспетчером',
       isIncident: true,
     });
+
+    const user = await this.prisma.user.findFirst({ where: { id: adminId } });
+    const sessionLog = await this.prisma.session.findFirst({ where: { id: sessionId }, select: { auction: true, account: true } });
+    if (user) {
+      this.notificationService.notify(adminId, "SESSION_ENDED", {
+        subject: "Новий вхід до системи",
+        body: `Користувач ${user.firstName} ${user.lastName} примусово закінчив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
+      }, false)
+    }
 
     this.rabbitClient
       .emit('stop_browser_session', {
@@ -166,7 +228,14 @@ export class SessionsService implements OnModuleInit {
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 2),
         },
       });
-
+      const user = await this.prisma.user.findFirst({ where: { id: userId } });
+      const sessionLog = await this.prisma.session.findFirst({ where: { id: sessionId }, select: { auction: true, account: true } });
+      if (user) {
+        this.notificationService.notify(userId, "SESSION_STARTED", {
+          subject: "Новий вхід до системи",
+          body: `Користувач ${user.firstName} ${user.lastName} запустив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
+        }, false)
+      }
       this.startBrowserWorker(session.id, auction.url, width, height, authData);
     }
 
@@ -222,6 +291,7 @@ export class SessionsService implements OnModuleInit {
                 severity: 'Info',
                 message: 'Сесія завершена автоматично (немає активних підключень)',
               });
+
 
               // ДОДАНО .subscribe() - тепер команда реально дійде до Worker-а!
               this.rabbitClient

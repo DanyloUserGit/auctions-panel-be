@@ -12,14 +12,16 @@ import type { LoginDto } from './dto/LoginDto';
 import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { verifyPassword } from '../utils/password';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
-    private prisma: PrismaService
-  ) {}
+    private prisma: PrismaService,
+    private notificationService: NotificationService
+  ) { }
 
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.usersService.findOneByEmail(email);
@@ -65,6 +67,10 @@ export class AuthService {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
+    this.notificationService.notify(payload.id, "USER_LOGED_IN", {
+      subject: "Новий вхід до системи",
+      body: `Користувач ${payload.firstName} ${payload.lastName} увійшов в систему.`
+    }, false)
 
     return { accessToken, refreshToken };
   }
@@ -107,6 +113,17 @@ export class AuthService {
   async logout(refreshToken: string) {
     if (!refreshToken) return;
 
+    const tokenRecord = await this.prisma.refreshToken.findUnique({
+      where: { token: refreshToken },
+      include: { user: true },
+    });
+
+    if (tokenRecord) {
+      this.notificationService.notify(tokenRecord.user.id, "USER_LOGED_OUT", {
+        subject: "Новий вхід до системи",
+        body: `Користувач ${tokenRecord.user.firstName} ${tokenRecord.user.lastName} вийшов з системи.`
+      }, false)
+    }
     await this.prisma.refreshToken.deleteMany({
       where: { token: refreshToken },
     });

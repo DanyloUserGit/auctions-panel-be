@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { NotificationChannel } from '@prisma/client';
+import { NotificationChannel, Roles } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationGateway } from './notification.gateway';
@@ -37,37 +37,70 @@ export class NotificationService {
         }));
     }
 
-    async notify(userId: string, typeName: string, content: { subject: string; body: string }) {
+    async notify(userId: string, typeName: string, content: { subject: string; body: string }, sendEmail?: boolean) {
         const setting = await this.prisma.userNotificationSetting.findFirst({
             where: { userId, notificationType: { name: typeName } },
             include: { user: true, notificationType: true }
         });
-
+        console.log("Setting: ", setting)
         if (!setting) return;
-
+        console.log("Setting end")
         const groupRequirement = setting.user.auctionGroupId
             ? await this.prisma.groupNotificationRequirement.findFirst({
                 where: { notificationTypeId: setting.notificationTypeId, groupId: setting.user.auctionGroupId }
             }) : null;
 
         const isMandatory = groupRequirement?.isMandatory || false;
-
+        console.log("isMandatory")
         if (setting.isEnabled || isMandatory) {
+
             // In-App
             if (setting.channels.includes(NotificationChannel.InApp)) {
+                console.log("IN-APP")
                 const newNotif = await this.prisma.notification.create({
                     data: { userId, type: typeName, message: content.body },
                 });
-                this.gateway.sendToUser(userId, {
-                    id: newNotif.id,
-                    type: typeName,
-                    message: content.body,
-                    createdAt: newNotif.createdAt
+                const allSuperAdmins = await this.prisma.user.findMany({
+                    where: { role: Roles.SuperAdmin }, select: {
+                        id: true
+                    }
                 });
+                const groups = await this.prisma.auctionGroup.findMany({
+                    where: {
+                        users: {
+                            some: {
+                                id: userId,
+                            },
+                        },
+                    },
+                    select: {
+                        AdminId: true
+                    }
+                })
+                const allUsers = [{ id: userId }, ...allSuperAdmins.filter((item) => item.id !== userId), ...groups.filter((item) => item.AdminId !== userId).map((group) => { return { id: group.AdminId } })].map((item) => item.id);
+                console.log("allUsers: ", allUsers)
+                allUsers.map((id) => {
+                    if (id) {
+                        setTimeout(() => {
+                            this.gateway.sendToUser(id, {
+                                id: newNotif.id,
+                                type: typeName,
+                                message: content.body,
+                                createdAt: newNotif.createdAt
+                            });
+                            console.log(id, {
+                                id: newNotif.id,
+                                type: typeName,
+                                message: content.body,
+                                createdAt: newNotif.createdAt
+                            })
+                        }, 5000)
+                    }
+                })
             }
 
             // Email
-            if (setting.channels.includes(NotificationChannel.Email) && setting.user.email) {
+            if (sendEmail && setting.channels.includes(NotificationChannel.Email) && setting.user.email) {
                 await this.mailService.send(setting.user.email, content.subject, content.body);
             }
 
@@ -158,7 +191,7 @@ export class NotificationService {
     async setGroupMandatoryRequirement(adminUserId: string, groupId: string, typeId: string, isMandatory: boolean) {
         const group = await this.prisma.auctionGroup.findUnique({ where: { id: groupId } });
 
-        if (!group || group.groupAdminId !== adminUserId) {
+        if (!group || group.AdminId !== adminUserId) {
             throw new ForbiddenException("Тільки адміністратор групи може змінювати ці налаштування");
         }
 
@@ -172,9 +205,12 @@ export class NotificationService {
         const types = [
             { name: 'SESSION_STARTED', description: 'Сповіщення про успішний запуск сесії для аукціону' },
             { name: 'SESSION_EXPIRING', description: 'Попередження про те, що час активної сесії скоро закінчиться' },
+            { name: 'SESSION_ENDED', description: 'Попередження про те, що активна сесія закінчилася' },
             { name: 'AUCTION_ENDED', description: 'Сповіщення про завершення аукціону' },
             { name: 'ADDED_TO_GROUP', description: 'Сповіщення про додавання користувача до нової групи' },
             { name: 'WORKER_ERROR', description: 'Критичні сповіщення про помилки в роботі воркерів' },
+            { name: 'USER_LOGED_IN', description: 'Користувач увійшов до системи' },
+            { name: 'USER_LOGED_OUT', description: 'Користувач вийшов з системи' },
         ];
 
         let processedCount = 0;

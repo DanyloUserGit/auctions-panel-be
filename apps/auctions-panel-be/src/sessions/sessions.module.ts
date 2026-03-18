@@ -6,6 +6,7 @@ import { SessionsService } from './sessions.service';
 import { SessionGateway } from './session.gateway';
 import { SessionsApiController } from './sessions-api.controller';
 import { SessionLoggerModule } from '../session-logger/session-logger.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -23,7 +24,8 @@ import { SessionLoggerModule } from '../session-logger/session-logger.module';
       },
     ]),
     PrismaModule,
-    SessionLoggerModule
+    SessionLoggerModule,
+    NotificationModule
   ],
   controllers: [SessionsController, SessionsApiController],
   providers: [SessionsService, SessionGateway],
