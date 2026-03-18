@@ -19,6 +19,8 @@ import { TrainingModule } from './training/training.module';
 import { SessionLoggerModule } from './session-logger/session-logger.module';
 import { GlobalSettingsModule } from './global-settings/global-settings.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
+import { ClientDbModule } from './client-db/client-db.module';
+import { CalculationModule } from './calculation/calculation.module';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { AuditLogModule } from './audit-log/audit-log.module';
     SessionLoggerModule,
     GlobalSettingsModule,
     AuditLogModule,
+    ClientDbModule,
+    CalculationModule,
   ],
   providers: [
     {
