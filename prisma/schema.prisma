@@ -84,6 +84,7 @@ model User {
   terminatedSessions       Session[]                 @relation("SessionTerminator")
   sessionLogs              SessionLog[]
   accessibleGroupAccounts  AuctionGroup[]            @relation("GroupAccountAccess")
+  selectedAccounts         AuctionAuth[]
 
   @@map("users")
 }
@@ -194,6 +195,8 @@ model AuctionAuth {
   auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   sessions Session[]
+  user     User?     @relation(fields: [userId], references: [id])
+  userId   String?   @db.Uuid()
 
   @@map("auction_auths")
 }
