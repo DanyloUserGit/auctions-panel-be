@@ -26,18 +26,43 @@ export class ProfileService {
       }
 
       if (!isAdmin || user.id !== body.id) {
-        throw new ForbiddenException('Доступ заборонено');
+        if (user.id !== body.id) throw new ForbiddenException('Доступ заборонено');
+      }
+
+      let dataToUpdate: Partial<EditProfileDto> = { ...body };
+
+      delete dataToUpdate.id;
+
+      if (!isAdmin) {
+        const currentUser = await this.prismaService.user.findUnique({
+          where: { id: user.id },
+          select: { auctionGroup: { select: { allowedProfileFields: true } } }
+        });
+
+        const allowedFields = currentUser?.auctionGroup?.allowedProfileFields || [];
+
+        dataToUpdate = Object.keys(dataToUpdate).reduce((acc, key) => {
+          if (allowedFields.includes(key)) {
+            acc[key] = dataToUpdate[key];
+          }
+          return acc;
+        }, {} as Partial<EditProfileDto>);
+
+        if (Object.keys(dataToUpdate).length === 0) {
+          throw new BadRequestException('У вас немає прав для зміни цих полів');
+        }
       }
 
       return await this.prismaService.user.update({
         where: { id: body.id },
-        data: {
-          ...body,
-        },
+        data: dataToUpdate,
       });
     } catch (error) {
       if (error.code === 'P2002') {
         throw new BadRequestException('Цей email вже використовується');
+      }
+      if (error instanceof ForbiddenException || error instanceof BadRequestException) {
+        throw error;
       }
       throw new BadRequestException('Помилка при редагуванні профілю');
     }

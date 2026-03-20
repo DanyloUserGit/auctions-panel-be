@@ -250,6 +250,8 @@ model AuctionGroup {
   id    String @id @default(uuid()) @db.Uuid()
   title String
 
+  isActive Boolean
+
   sessionLimit        Int     @default(0)
   canGaManageAccounts Boolean @default(false)
   rules               Json?   @default("{}")
@@ -258,7 +260,10 @@ model AuctionGroup {
   auctions Auction[]
   sessions Session[]
 
+  lastActivity   DateTime?
+
   users User[] @relation("GroupParticipants")
+  allowedProfileFields  String[]  @default(["firstName", "lastName", "phone", "city"])
 
   AdminId                       String?                        @unique @db.Uuid()
   Admin                         User?                          @relation("Administrator", fields: [AdminId], references: [id])
@@ -291,6 +296,8 @@ model ForbiddenSelector {
   selector  String
   auctionId String  @db.Uuid
   auction   Auction @relation(fields: [auctionId], references: [id])
+
+  isBuyAction Boolean  @default(false)
 
   @@map("forbidden_selectors")
 }
