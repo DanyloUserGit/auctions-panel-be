@@ -1,10 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptData } from '../utils/encrypt';
 import { hashPassword } from '../utils/password';
 import { CreateAuctionAuthDto } from './dto/create-auction-auth.dto';
 import { UpdateAuctionAuthDto } from './dto/update-auction-auth.dto';
+import { User } from '@prisma/client';
 
 @Injectable()
 export class AuctionAuthService {
@@ -36,17 +37,18 @@ export class AuctionAuthService {
     });
   }
 
-  async selectAccount(accountId: string, userId: string) {
+  async selectAccount(accountId: string, user: User) {
     try {
-      const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { selectedAccounts: true } });
-      if (!user) throw new NotFoundException("Користувача не знайдено");
+      if(!user) throw new UnauthorizedException("Користувач не знайдений");
+      const userS = await this.prisma.user.findUnique({ where: { id: user.id }, include: { selectedAccounts: true } });
+      if (!userS) throw new NotFoundException("Користувача не знайдено");
 
-      const alreadyAdded = user.selectedAccounts.some((u) => u.id === accountId);
+      const alreadyAdded = userS.selectedAccounts.some((u) => u.id === accountId);
 
       if (alreadyAdded) return { status: true };
 
       return await this.prisma.user.update({
-        where: { id: userId },
+        where: { id: user.id },
         data: {
           selectedAccounts: {
             connect: { id: accountId },
@@ -58,24 +60,25 @@ export class AuctionAuthService {
     }
   }
 
-  async removeAccount(accountId: string, userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+  async removeAccount(accountId: string, user: User) {
+    if(!user) throw new UnauthorizedException("Користувач не знайдений");
+    const userS = await this.prisma.user.findUnique({
+      where: { id: user.id },
       include: { selectedAccounts: true },
     });
 
-    if (!user) {
+    if (!userS) {
       throw new NotFoundException('Користувача не знайдено');
     }
 
-    const isAttached = user.selectedAccounts.some((u) => u.id === accountId);
+    const isAttached = userS.selectedAccounts.some((u) => u.id === accountId);
 
     if (!isAttached) {
       return { status: true };
     }
 
     return await this.prisma.user.update({
-      where: { id: userId },
+      where: { id: user.id },
       data: {
         selectedAccounts: {
           disconnect: { id: accountId },
@@ -84,10 +87,11 @@ export class AuctionAuthService {
     });
   }
 
-  async getSelectedAccounts(userId: string) {
+  async getSelectedAccounts(user: User) {
     try {
-      const user = await this.prisma.user.findUnique({ where: { id: userId }, include: { selectedAccounts: true } });
-      return user?.selectedAccounts ?? [];
+      if (!user) throw new UnauthorizedException("Користувач не знайдений");
+      const userS = await this.prisma.user.findUnique({ where: { id: user.id }, include: { selectedAccounts: true } });
+      return userS?.selectedAccounts ?? [];
     } catch (error) {
       throw error;
     }

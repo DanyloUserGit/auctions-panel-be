@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Roles } from '@prisma/client';
+import { Prisma, Roles, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPathDto } from './dto/add-path.dto';
 import { AddSelectorDto } from './dto/add-selector.dto';
@@ -358,13 +358,19 @@ export class AuctionsService {
       throw error;
     }
   }
-  async getForbiddenSelector(id: string) {
-    try {
-      const selectors = await this.prismaService.forbiddenSelector.findMany({ where: { auctionId: id } });
-      return selectors;
-    } catch (error) {
-      throw error;
+  async getForbiddenSelector(auctionId: string, user: User) {
+    const selectors = await this.prismaService.forbiddenSelector.findMany({
+      where: { auctionId },
+    });
+
+    if (!user || user.role === Roles.SuperAdmin) return selectors;
+
+    const canBuy = user.sessionRights === 'Buy' || user.sessionRights === 'All';
+
+    if (canBuy) {
+      return selectors.filter(selector => selector.isBuyAction === false);
     }
+    return selectors;
   }
   async getAllowedPath(id: string) {
     try {

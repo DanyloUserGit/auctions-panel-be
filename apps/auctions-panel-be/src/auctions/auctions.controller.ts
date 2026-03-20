@@ -31,8 +31,8 @@ export class AuctionsController {
   }
 
   @Get(':id/forbidden-selectors')
-  getForbiddenSelector(@Param('id') auctionId: string) {
-    return this.auctionsService.getForbiddenSelector(auctionId);
+  getForbiddenSelector(@Param('id') auctionId: string, @Req() req) {
+    return this.auctionsService.getForbiddenSelector(auctionId, req.user);
   }
 
   @Get(':id/allowed-paths')

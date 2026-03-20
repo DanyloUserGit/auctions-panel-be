@@ -9,6 +9,29 @@ import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
 export class AuctionGroupsService {
   constructor(private prisma: PrismaService) { }
 
+  // Хелпер для прорахунку кількості та форматування результату
+  private withCounts(data: any | any[]) {
+    if (!data) return data;
+
+    const formatGroup = (group: any) => {
+      const adminCount = group.AdminId ? 1 : 0;
+      const usersCount = (group._count?.users || 0) + adminCount;
+      const auctionsCount = group._count?.auctions || 0;
+
+      // Можна видалити _count, щоб не дублювати дані, але залишаємо для сумісності
+      return {
+        ...group,
+        usersCount,
+        auctionsCount,
+      };
+    };
+
+    if (Array.isArray(data)) {
+      return data.map(formatGroup);
+    }
+    return formatGroup(data);
+  }
+
   async create(createAuctionGroupDto: CreateAuctionGroupDto, user: User) {
     const { auctions, Admin, users, ...rest } = createAuctionGroupDto;
 
@@ -37,9 +60,12 @@ export class AuctionGroupsService {
             connect: auctions.map((id) => ({ id })),
           },
         }),
+        isActive: true,
+        lastActivity: new Date(),
       },
       include: {
         auctions: true,
+        accounts: true,
       },
     });
   }
@@ -51,17 +77,29 @@ export class AuctionGroupsService {
     const isGroupAdmin = user?.role === Roles.Admin;
 
     if (isSuperAdmin) {
-      return this.prisma.auctionGroup.findMany({ include: { auctions: true, accounts: true } });
+      const groups = await this.prisma.auctionGroup.findMany({
+        include: {
+          auctions: true,
+          accounts: true,
+          _count: { select: { users: true, auctions: true } },
+        },
+      });
+      return this.withCounts(groups);
     }
 
     if (isGroupAdmin) {
-      return this.prisma.auctionGroup.findMany({
+      const groups = await this.prisma.auctionGroup.findMany({
         where: { Admin: { id: user.id } },
-        include: { auctions: true, accounts: true }
+        include: {
+          auctions: true,
+          accounts: true,
+          _count: { select: { users: true, auctions: true } },
+        },
       });
+      return this.withCounts(groups);
     }
 
-    return this.prisma.auctionGroup.findMany({
+    const groups = await this.prisma.auctionGroup.findMany({
       where: {
         auctions: {
           some: {
@@ -83,9 +121,11 @@ export class AuctionGroupsService {
             },
           },
         },
-        accounts: true
+        accounts: true,
+        _count: { select: { users: true, auctions: true } },
       },
     });
+    return this.withCounts(groups);
   }
 
   async findOne(id: string, user?: { id: string; role: Roles }) {
@@ -97,15 +137,27 @@ export class AuctionGroupsService {
     const isGroupAdmin = user?.role === Roles.Admin;
 
     if (isSuperAdmin) {
-      return this.prisma.auctionGroup.findMany({ where: { id }, include: { auctions: true } });
+      const groups = await this.prisma.auctionGroup.findMany({
+        where: { id },
+        include: {
+          auctions: true,
+          _count: { select: { users: true, auctions: true } },
+        },
+      });
+      return this.withCounts(groups);
     }
 
     if (isGroupAdmin) {
-      return this.prisma.auctionGroup.findMany({
+      const groups = await this.prisma.auctionGroup.findMany({
         where: { id, Admin: { id: user.id } },
-        include: { auctions: true }
+        include: {
+          auctions: true,
+          _count: { select: { users: true, auctions: true } },
+        },
       });
+      return this.withCounts(groups);
     }
+
     const group = await this.prisma.auctionGroup.findFirst({
       where: {
         id,
@@ -129,6 +181,7 @@ export class AuctionGroupsService {
             },
           },
         },
+        _count: { select: { users: true, auctions: true } },
       },
     });
 
@@ -136,7 +189,7 @@ export class AuctionGroupsService {
       throw new NotFoundException('Група аукціонів не знайдена або немає доступу');
     }
 
-    return group;
+    return this.withCounts(group);
   }
 
   async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto, user: User) {
@@ -166,6 +219,7 @@ export class AuctionGroupsService {
             set: auctions.map((id) => ({ id })),
           },
         }),
+        lastActivity: new Date(),
       },
       include: {
         auctions: true,
@@ -173,16 +227,33 @@ export class AuctionGroupsService {
     });
   }
 
+  async blockGroup(id: string) {
+    try {
+      return await this.prisma.auctionGroup.update({ where: { id }, data: { isActive: false } })
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async unBlockGroup(id: string) {
+    try {
+      return await this.prisma.auctionGroup.update({ where: { id }, data: { isActive: true } })
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async remove(id: string) {
     return await this.prisma.auctionGroup.delete({
       where: { id },
     });
   }
+
   async search(params: { user?: { id: string; role: Roles }; query?: string }) {
     const { user, query } = params;
     const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
-    console.log(query, user, isAdmin);
-    return this.prisma.auctionGroup.findMany({
+
+    const groups = await this.prisma.auctionGroup.findMany({
       where: {
         AND: [
           query
@@ -217,11 +288,15 @@ export class AuctionGroupsService {
               },
             },
           },
-        accounts: true
+        accounts: true,
+        _count: { select: { users: true, auctions: true } },
       },
       orderBy: { title: 'asc' },
     });
+
+    return this.withCounts(groups);
   }
+
   async addAuction(groupId: string, auctionId: string) {
     const group = await this.prisma.auctionGroup.findUnique({
       where: { id: groupId },
@@ -238,9 +313,11 @@ export class AuctionGroupsService {
         auctions: {
           connect: { id: auctionId },
         },
+        lastActivity: new Date(),
       },
     });
   }
+
   async removeAuction(groupId: string, userId: string) {
     const group = await this.prisma.auctionGroup.findUnique({
       where: { id: groupId },
@@ -263,6 +340,7 @@ export class AuctionGroupsService {
         auctions: {
           disconnect: { id: userId },
         },
+        lastActivity: new Date(),
       },
     });
   }
@@ -270,13 +348,14 @@ export class AuctionGroupsService {
   async grantAccountAccess(groupId: string, userId: string) {
     return await this.prisma.auctionGroup.update({
       where: { id: groupId },
-      data: { accounts: { connect: { id: userId } } },
+      data: { accounts: { connect: { id: userId } }, lastActivity: new Date() },
     });
   }
+
   async revokeAccountAccess(groupId: string, userId: string) {
     return await this.prisma.auctionGroup.update({
       where: { id: groupId },
-      data: { accounts: { disconnect: { id: userId } } },
+      data: { accounts: { disconnect: { id: userId } }, lastActivity: new Date() },
     });
   }
 }

@@ -24,6 +24,17 @@ export class AuctionGroupsController {
     });
   }
 
+  @Post(':id/block-group')
+  blockGroup(@Param('id') groupId: string,) {
+    return this.auctionGroupsService.blockGroup(groupId);
+  }
+
+  @Post(':id/unblock-group')
+  unBlockGroup(@Param('id') groupId: string,) {
+    return this.auctionGroupsService.unBlockGroup(groupId);
+  }
+
+
   @Post(':id/grant-account-access')
   grantAccountAccess(@Param('id') groupId: string, @Body() body: { userId: string }) {
     return this.auctionGroupsService.grantAccountAccess(groupId, body.userId);
