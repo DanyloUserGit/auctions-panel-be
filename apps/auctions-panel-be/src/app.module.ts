@@ -22,6 +22,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
 import { ClientDbModule } from './client-db/client-db.module';
 import { CalculationModule } from './calculation/calculation.module';
 import { BalanceModule } from './balance/balance.module';
+import { ProcessesModule } from './processes/processes.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { BalanceModule } from './balance/balance.module';
     ClientDbModule,
     CalculationModule,
     BalanceModule,
+    ProcessesModule,
   ],
   providers: [
     {

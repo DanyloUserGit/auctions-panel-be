@@ -141,9 +141,12 @@ export class AuctionGroupsService {
         where: { id },
         include: {
           auctions: true,
-          _count: { select: { users: true, auctions: true,
-            accounts:true,
-           } },
+          _count: {
+            select: {
+              users: true, auctions: true,
+              accounts: true,
+            }
+          },
         },
       });
       return this.withCounts(groups);
@@ -154,9 +157,12 @@ export class AuctionGroupsService {
         where: { id, Admin: { id: user.id } },
         include: {
           auctions: true,
-          _count: { select: { users: true, auctions: true,
-            accounts:true,
-           } },
+          _count: {
+            select: {
+              users: true, auctions: true,
+              accounts: true,
+            }
+          },
         },
       });
       return this.withCounts(groups);
@@ -185,7 +191,7 @@ export class AuctionGroupsService {
             },
           },
         },
-        accounts:true,
+        accounts: true,
         _count: { select: { users: true, auctions: true } },
       },
     });
@@ -211,9 +217,11 @@ export class AuctionGroupsService {
       where: { id },
       data: {
         ...rest,
-        Admin: {
-          connect: { id: Admin },
-        },
+        ...(Admin && {
+          Admin: {
+            connect: { id: Admin },
+          },
+        }),
         ...(users && {
           users: {
             connect: users.map((id) => ({ id })),
