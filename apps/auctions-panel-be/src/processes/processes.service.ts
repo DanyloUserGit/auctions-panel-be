@@ -6,22 +6,33 @@ export class ProcessesService {
     constructor(private readonly dbManager: ExternalDbManager) { }
 
     // Допоміжні функції
-    private isFilled(v: string | null): boolean {
-        if (!v) return false;
-        const str = v.trim().toLowerCase();
+    private isFilled(v: any): boolean {
+        if (v === null || v === undefined) return false;
+        if (v instanceof Date) return true; // Якщо це об'єкт Date, поле точно заповнене
+
+        // Якщо це рядок або число, безпечно конвертуємо в рядок перед trim()
+        const str = String(v).trim().toLowerCase();
         if (str === '' || str === 'null' || str === 'none' || str === 'n/a') return false;
         if (str === '0000-00-00' || str === '0000-00-00 00:00:00' || str === '0') return false;
         return true;
     }
 
-    private asofDone(v: string | null, asof: string): boolean {
+    private asofDone(v: any, asof: string): boolean {
         if (!this.isFilled(v)) return false;
         if (!asof) return true;
-        const date = new Date(v as string);
-        if (isNaN(date.getTime())) return false;
-        return date.toISOString().split('T')[0] <= asof;
-    }
 
+        const date = v instanceof Date ? v : new Date(v);
+        if (isNaN(date.getTime())) return false;
+
+        // Форматуємо дату в YYYY-MM-DD локального часу
+        // (не використовуємо toISOString(), бо воно може зсунути дату на день назад через часовий пояс)
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const formattedDate = `${year}-${month}-${day}`;
+
+        return formattedDate <= asof;
+    }
     private listTechDocUrls(documents: string | null): string[] {
         if (!documents) return [];
         return documents.split('|').filter(u => {
@@ -87,9 +98,16 @@ export class ProcessesService {
             cars = cars.filter(r => {
                 const dt = r.data_faktury_zakup;
                 if (!this.isFilled(dt)) return true;
-                const date = new Date(dt);
+
+                const date = dt instanceof Date ? dt : new Date(dt);
                 if (isNaN(date.getTime())) return true;
-                return date.toISOString().split('T')[0] <= asofVal;
+
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const formattedDate = `${year}-${month}-${day}`;
+
+                return formattedDate <= asofVal;
             });
         }
 
