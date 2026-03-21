@@ -141,6 +141,7 @@ export class AuctionGroupsService {
         where: { id },
         include: {
           auctions: true,
+          accounts: true,
           _count: {
             select: {
               users: true, auctions: true,
@@ -191,8 +192,7 @@ export class AuctionGroupsService {
             },
           },
         },
-        accounts: true,
-        _count: { select: { users: true, auctions: true } },
+        _count: { select: { users: true, auctions: true, accounts: true, } },
       },
     });
 
