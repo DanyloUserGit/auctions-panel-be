@@ -120,6 +120,7 @@ export class AuctionGroupsController {
   })
   update(@Param('id') id: string, @Body() updateAuctionGroupDto: UpdateAuctionGroupDto, @Req() req) {
     const data = UpdateAuctionGroupSchema.parse(updateAuctionGroupDto);
+    console.log(data)
     return this.auctionGroupsService.update(id, data, req.user);
   }
 

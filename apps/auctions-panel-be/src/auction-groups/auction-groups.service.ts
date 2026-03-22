@@ -41,7 +41,7 @@ export class AuctionGroupsService {
       delete createAuctionGroupDto.sessionLimit;
       delete createAuctionGroupDto.canGaManageAccounts;
     }
-
+    
     return await this.prisma.auctionGroup.create({
       data: {
         ...rest,
@@ -204,14 +204,14 @@ export class AuctionGroupsService {
   }
 
   async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto, user: User) {
-    const { auctions, Admin, users, ...rest } = updateAuctionGroupDto;
-
     const isSuperAdmin = user?.role === Roles.SuperAdmin;
 
     if (!isSuperAdmin) {
       delete updateAuctionGroupDto.sessionLimit;
       delete updateAuctionGroupDto.canGaManageAccounts;
     }
+
+    const { auctions, Admin, users, ...rest } = updateAuctionGroupDto;
 
     return await this.prisma.auctionGroup.update({
       where: { id },
