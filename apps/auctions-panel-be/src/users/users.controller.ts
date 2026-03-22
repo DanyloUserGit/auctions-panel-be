@@ -8,10 +8,9 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
+import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
-import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
-import { Public } from '../decorators/public.decorator';
 
 @ApiTags('users')
 @Controller('users')
@@ -44,7 +43,6 @@ export class UsersController {
       ],
     },
   })
-  @Public()
   create(@Body() createUserDto: CreateUserDto, @Req() req) {
     const data = CreateUserSchema.parse(createUserDto);
     if (req.user) {

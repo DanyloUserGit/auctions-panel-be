@@ -106,7 +106,7 @@ export class UsersService {
     });
   }
   async findAll() {
-    return await this.prisma.user.findMany();
+    return await this.prisma.user.findMany({ include: { managedGroup: true } });
   }
 
   async findOne(id: string) {
@@ -119,8 +119,9 @@ export class UsersService {
         lastName: true,
         role: true,
         rights: true,
-        phone:true,
-        auctionGroupId:true
+        phone: true,
+        auctionGroupId: true,
+        managedGroup:true
       },
     });
     if (!user) {
@@ -205,6 +206,7 @@ export class UsersService {
         take: Number(limit),
         include: {
           session: true,
+          managedGroup: true,
         },
       }),
       this.prisma.user.count({ where }),

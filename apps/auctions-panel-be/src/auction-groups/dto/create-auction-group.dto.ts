@@ -8,7 +8,7 @@ export const CreateAuctionGroupSchema = z.object({
   users: z.array(z.string().uuid({ message: 'UserId має бути валідним UUID.' })).optional(),
   Admin: z.string().uuid({
     message: 'Admin має бути валідним UUID.',
-  }).optional(),
+  }).optional().nullable(),
 
   auctions: z
     .array(

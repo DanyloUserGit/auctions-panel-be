@@ -13,6 +13,7 @@ import { UsersService } from '../users/users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { verifyPassword } from '../utils/password';
 import { NotificationService } from '../notification/notification.service';
+import axios from 'axios';
 
 @Injectable()
 export class AuthService {
@@ -22,6 +23,20 @@ export class AuthService {
     private prisma: PrismaService,
     private notificationService: NotificationService
   ) { }
+
+  async verifyTurnstileToken(token: string) {
+    const response = await axios.post(
+      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+      {
+        secret: process.env.TURNSTILE_SECRET_KEY,
+        response: token,
+      },
+    );
+
+    if (!response.data.success) {
+      throw new ForbiddenException('Капча не пройдена або застаріла');
+    }
+  }
 
   async validateUser(email: string, password: string): Promise<User> {
     const user = await this.usersService.findOneByEmail(email);
@@ -35,6 +50,8 @@ export class AuthService {
   }
 
   async login(user: LoginDto) {
+    await this.verifyTurnstileToken(user.token);
+
     const existing = await this.usersService.findOneByEmail(user.email);
 
     if (!existing) {
