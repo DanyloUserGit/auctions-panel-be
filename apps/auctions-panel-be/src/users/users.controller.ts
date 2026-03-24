@@ -11,6 +11,7 @@ import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dt
 import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
+import { Public } from '../decorators/public.decorator';
 
 @ApiTags('users')
 @Controller('users')
@@ -28,6 +29,7 @@ export class UsersController {
   }
 
   @Post()
+  @Public()
   @ApiBody({ type: CreateUserSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
