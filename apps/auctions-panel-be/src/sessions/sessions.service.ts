@@ -56,7 +56,7 @@ export class SessionsService implements OnModuleInit {
         },
       });
 
-      if (expiredSessions.length === 0) return; 
+      if (expiredSessions.length === 0) return;
       await this.prisma.session.updateMany({
         where: { id: { in: expiredSessions.map(s => s.id) } },
         data: {
@@ -140,7 +140,7 @@ export class SessionsService implements OnModuleInit {
     const sessionLog = await this.prisma.session.findFirst({ where: { id: sessionId }, select: { auction: true, account: true } });
     if (user) {
       this.notificationService.notify(adminId, "SESSION_ENDED", {
-        subject: "Новий вхід до системи",
+        subject: "Сесія примусово завершена",
         body: `Користувач ${user.firstName} ${user.lastName} примусово закінчив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
       }, false)
     }
@@ -170,12 +170,26 @@ export class SessionsService implements OnModuleInit {
     height: number,
     sessionId?: string
   ) {
-    const auction = await this.prisma.auction.findUnique({ where: { id: auctionId } });
+    const auction = await this.prisma.auction.findUnique({
+      where: { id: auctionId }, include: {
+        allowedRoutes: true,
+        forbiddenRoutes: true,
+        forbiddenSelectors: true,
+      }
+    });
     const authData = await this.prisma.auctionAuth.findUnique({ where: { id: auctionAuthId } });
 
     if (!auction || !authData) {
       throw new BadRequestException('Не знайдено облікових даних для цього аукціону');
     }
+
+    console.log(`[SessionsService] Знайдено заборонених роутів для ${auctionId}:`, auction?.forbiddenRoutes);
+
+    const allowedRoutesArr = auction.allowedRoutes.map(route => route.path);
+    const forbiddenRoutesArr = auction.forbiddenRoutes.map(route => route.path);
+    const forbiddenSelectorsArr = auction.forbiddenSelectors.map(sel => sel.selector);
+
+    console.log(`[SessionsService] Масив шляхів для відправки:`, forbiddenRoutesArr);
 
     let session: Session | null = null;
     if (sessionId) {
@@ -213,7 +227,10 @@ export class SessionsService implements OnModuleInit {
 
       // 3. Запускаємо Playwright ТІЛЬКИ якщо він був реально зупинений
       if (wasInactive) {
-        this.startBrowserWorker(session.id, auction.url, width, height, authData);
+        this.startBrowserWorker(
+          session.id, auction.url, width, height, authData,
+          allowedRoutesArr, forbiddenSelectorsArr, forbiddenRoutesArr
+        );
       }
 
     } else {
@@ -236,13 +253,23 @@ export class SessionsService implements OnModuleInit {
           body: `Користувач ${user.firstName} ${user.lastName} запустив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
         }, false)
       }
-      this.startBrowserWorker(session.id, auction.url, width, height, authData);
+      this.startBrowserWorker(
+        session.id, auction.url, width, height, authData,
+        allowedRoutesArr, forbiddenSelectorsArr, forbiddenRoutesArr
+      );
     }
 
     return session;
   }
 
-  private startBrowserWorker(sessionId: string, auctionUrl: string, width: number, height: number, authData: any) {
+  private startBrowserWorker(sessionId: string,
+    auctionUrl: string,
+    width: number,
+    height: number,
+    authData: any,
+    allowedRoutes: string[],
+    forbiddenSelectors: string[],
+    forbiddenRoutes: string[]) {
     this.rabbitClient
       .emit('start_browser_session', {
         sessionId,
@@ -251,6 +278,9 @@ export class SessionsService implements OnModuleInit {
         height,
         authEmail: authData.email,
         authPassword: decryptData(authData.password),
+        allowedRoutes,
+        forbiddenSelectors,
+        forbiddenRoutes
       })
       .subscribe({
         next: () => console.log(`✅ Завдання (сесія: ${sessionId}) успішно відправлено в RabbitMQ!`),

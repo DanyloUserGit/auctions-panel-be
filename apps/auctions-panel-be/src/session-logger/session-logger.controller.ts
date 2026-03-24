@@ -13,7 +13,6 @@ import { RolesDecorator } from '../decorators/roles.decorator';
 import type { LogFilterDto } from './dto/session-log.dto';
 import { SessionLoggerService } from './session-logger.service';
 
-
 @UseGuards(RolesGuard)
 @RolesDecorator(Roles.SuperAdmin, Roles.Admin)
 @Controller('dispatcher/logs')
@@ -27,15 +26,12 @@ export class SessionLoggerController {
     ) {
         const user = req.user;
 
-        if (!user.auctionGroupId) {
-            if (!(user.role == Roles.SuperAdmin))
-                throw new ForbiddenException("Ви не керуєте жодною групою");
+        if (!user.auctionGroupId && user.role !== Roles.SuperAdmin) {
+            throw new ForbiddenException("Ви не керуєте жодною групою");
         }
 
-        let auctionGroupId: string | undefined = user.auctionGroupId ?? undefined;
-
         if (user.role !== Roles.SuperAdmin) {
-            filters.auctionGroupId = auctionGroupId;
+            filters.auctionGroupId = user.auctionGroupId ?? undefined;
         }
 
         if (typeof filters.isIncident === 'string') {
@@ -47,37 +43,37 @@ export class SessionLoggerController {
 
     @Get('forbidden')
     async getForbiddenActions(
-        @Query('skip') skip: string,
-        @Query('take') take: string,
+        @Query() filters: LogFilterDto,
         @Req() req: { user: User },
     ) {
         const user = req.user;
-        if (!user.auctionGroupId) {
-            if (!(user.role == Roles.SuperAdmin))
-                throw new ForbiddenException("Ви не керуєте жодною групою");
+        
+        if (!user.auctionGroupId && user.role !== Roles.SuperAdmin) {
+            throw new ForbiddenException("Ви не керуєте жодною групою");
         }
-        const auctionGroupId: string | undefined = (user.role !== Roles.SuperAdmin ? user.auctionGroupId : undefined) ?? undefined;
 
-        return this.loggerService.getForbiddenActionsJournal(
-            auctionGroupId,
-            skip ? Number(skip) : 0,
-            take ? Number(take) : 50
-        );
+        if (user.role !== Roles.SuperAdmin) {
+            filters.auctionGroupId = user.auctionGroupId ?? undefined;
+        }
+
+        return this.loggerService.getForbiddenActionsJournal(filters);
     }
 
     @Get('incidents')
     async getIncidents(
-        @Query('skip') skip: string,
-        @Query('take') take: string,
-        @Request() req: any,
+        @Query() filters: LogFilterDto,
+        @Request() req: { user: User },
     ) {
         const user = req.user;
-        const auctionGroupId = user.role !== Roles.SuperAdmin ? user.auctionGroupId : undefined;
+        
+        if (!user.auctionGroupId && user.role !== Roles.SuperAdmin) {
+            throw new ForbiddenException("Ви не керуєте жодною групою");
+        }
 
-        return this.loggerService.getIncidentsJournal(
-            auctionGroupId,
-            skip ? Number(skip) : 0,
-            take ? Number(take) : 50
-        );
+        if (user.role !== Roles.SuperAdmin) {
+            filters.auctionGroupId = user.auctionGroupId ?? undefined;
+        }
+
+        return this.loggerService.getIncidentsJournal(filters);
     }
 }

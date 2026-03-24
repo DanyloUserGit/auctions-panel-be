@@ -25,7 +25,8 @@ export class BrowserWorkerController {
         { width: data.width, height: data.height },
         { email: data.authEmail, password: data.authPassword },
         data.allowedRoutes || [],
-        data.forbiddenSelectors || []
+        data.forbiddenSelectors || [],
+        data.forbiddenRoutes || []
       );
       console.log(`[Worker] Playwright успішно запущено для сесії: ${data.sessionId}`);
 
