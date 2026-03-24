@@ -23,6 +23,7 @@ import { ClientDbModule } from './client-db/client-db.module';
 import { CalculationModule } from './calculation/calculation.module';
 import { BalanceModule } from './balance/balance.module';
 import { ProcessesModule } from './processes/processes.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { ProcessesModule } from './processes/processes.module';
     CalculationModule,
     BalanceModule,
     ProcessesModule,
+    AnalyticsModule,
   ],
   providers: [
     {
