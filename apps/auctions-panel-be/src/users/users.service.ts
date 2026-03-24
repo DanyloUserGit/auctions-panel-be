@@ -30,8 +30,20 @@ export class UsersService {
         ...createUserDto,
         password: hashedPassword,
         auctionGroupId: targetGroupId || null,
+        managedGroup: undefined,
       },
     });
+
+    if (createUserDto.managedGroup) {
+      await this.prisma.auctionGroup.update({
+        where: { id: createUserDto.managedGroup },
+        data: {
+          Admin: {
+            connect: { id: user.id }
+          }
+        }
+      });
+    }
     await this.notificationService.initializeDefaultSettings(user.id);
     return user;
   }
@@ -121,7 +133,7 @@ export class UsersService {
         rights: true,
         phone: true,
         auctionGroupId: true,
-        managedGroup:true
+        managedGroup: true
       },
     });
     if (!user) {
@@ -147,7 +159,7 @@ export class UsersService {
       throw new NotFoundException(`Користувач з id ${id} не знайдений`);
     }
 
-    const updateData = { ...updateUserDto };
+    const updateData: any = { ...updateUserDto };
 
     if (updateData.email === user.email) {
       delete updateData.email;
@@ -161,10 +173,32 @@ export class UsersService {
       }
     }
 
-    return await this.prisma.user.update({
+    delete updateData.managedGroup;
+
+    const updatedUser = await this.prisma.user.update({
       where: { id },
       data: updateData,
     });
+
+    if (updateUserDto.managedGroup !== undefined) {
+      if (updateUserDto.managedGroup === null) {
+        await this.prisma.auctionGroup.updateMany({
+          where: { AdminId: id },
+          data: { AdminId: null }
+        });
+      } else {
+        await this.prisma.auctionGroup.update({
+          where: { id: updateUserDto.managedGroup },
+          data: {
+            Admin: {
+              connect: { id }
+            }
+          }
+        });
+      }
+    }
+
+    return updatedUser;
   }
 
   async remove(id: string) {

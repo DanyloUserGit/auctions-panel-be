@@ -16,6 +16,7 @@ export const CreateUserSchema = z.object({
   }),
   auctionGroupId: z.string().uuid().optional(),
   sessionLimit: z.number().int().min(1).default(1), 
+  managedGroup: z.string().uuid().optional()
 });
 
 export type CreateUserDto = z.infer<typeof CreateUserSchema>;
