@@ -7,7 +7,6 @@ import { PrismaService } from '../prisma/prisma.service';
 export class SessionLoggerService {
     constructor(private readonly prisma: PrismaService) { }
 
-
     async logEvent(dto: CreateLogDto) {
         return this.prisma.sessionLog.create({
             data: {
@@ -41,11 +40,21 @@ export class SessionLoggerService {
         if (filters.eventType) where.eventType = filters.eventType;
         if (filters.isIncident !== undefined) where.isIncident = filters.isIncident;
 
+        // Фільтр по конкретному користувачу (хто зробив дію)
+        if (filters.userId) where.userId = filters.userId;
+
+        // Фільтр по датах
+        if (filters.startDate || filters.endDate) {
+            where.createdAt = {};
+            if (filters.startDate) where.createdAt.gte = new Date(filters.startDate);
+            if (filters.endDate) where.createdAt.lte = new Date(filters.endDate);
+        }
+
         // Пошук по тексту (повідомлення)
         if (filters.search) {
             where.message = {
                 contains: filters.search,
-                mode: 'insensitive', 
+                mode: 'insensitive',
             };
         }
 
@@ -57,30 +66,25 @@ export class SessionLoggerService {
 
         return this.prisma.sessionLog.findMany({
             where,
-            orderBy: { createdAt: 'desc' }, 
-            skip: filters.skip || 0,
-            take: filters.take || 50,
+            orderBy: { createdAt: 'desc' },
+            // Перевіряємо та конвертуємо skip/take, якщо вони прийшли як рядки
+            skip: filters.skip ? Number(filters.skip) : 0,
+            take: filters.take ? Number(filters.take) : 50,
             include: {
-                user: { select: { id: true, firstName: true, lastName: true, email: true } }, 
+                user: { select: { id: true, firstName: true, lastName: true, email: true } },
             },
         });
     }
 
-    async getForbiddenActionsJournal(auctionGroupId?: string, skip = 0, take = 50) {
-        return this.getSessionLogs({
-            eventType: SessionEventType.ForbiddenAction,
-            auctionGroupId, 
-            skip,
-            take,
-        });
+    async getForbiddenActionsJournal(filters: LogFilterDto) {
+        // Примусово обмежуємо пошук тільки забороненими діями
+        filters.eventType = SessionEventType.ForbiddenAction;
+        return this.getSessionLogs(filters);
     }
 
-    async getIncidentsJournal(auctionGroupId?: string, skip = 0, take = 50) {
-        return this.getSessionLogs({
-            isIncident: true,
-            auctionGroupId, 
-            skip,
-            take,
-        });
+    async getIncidentsJournal(filters: LogFilterDto) {
+        // Примусово обмежуємо пошук тільки інцидентами
+        filters.isIncident = true;
+        return this.getSessionLogs(filters);
     }
 }
