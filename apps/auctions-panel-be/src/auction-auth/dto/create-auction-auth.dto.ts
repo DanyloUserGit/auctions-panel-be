@@ -2,6 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 
 export const CreateAuctionAuthSchema = z.object({
+  title: z.string({
+    message: 'Назва акаунта має бути валідною.',
+  }),
   email: z.string({
     message: 'Акаунт має бути валідним.',
   }),
@@ -16,6 +19,12 @@ export const CreateAuctionAuthSchema = z.object({
 export type CreateAuctionAuthDto = z.infer<typeof CreateAuctionAuthSchema>;
 
 export class CreateAuctionAuthSwaggerDto {
+  @ApiProperty({
+    example: 'account name',
+    description: 'title для акаунту аукціону',
+  })
+  title: string;
+
   @ApiProperty({
     example: 'user@example.com',
     description: 'Email для входу в аукціон',

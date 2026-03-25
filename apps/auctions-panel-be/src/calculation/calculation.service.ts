@@ -46,19 +46,12 @@ export class CalculationService {
         return rows[0]?.price || 0;
     }
 
-    /**
-     * Повна формула розмитнення (згідно з законодавством України, яке зазвичай в .tpl)
-     */
     calculateFullEstimate(params: CalcParams, basePriceFromDb: number) {
         const { auctionPrice, engineVolume, year, fuelType } = params;
         const currentYear = new Date().getFullYear();
 
-        // 1. Ввізне мито (зазвичай 10% від вартості)
         const importDuty = auctionPrice * 0.10;
 
-        // 2. Акциз
-        // Базова ставка: бензин до 3л = 50 євро, бензин понад 3л = 100 євро
-        // Дизель до 3.5л = 75 євро, понад 3.5л = 150 євро
         let baseRate = fuelType === 'petrol' ? (engineVolume <= 3000 ? 50 : 100) : (engineVolume <= 3500 ? 75 : 150);
         let age = currentYear - year - 1;
         if (age <= 0) age = 1;
@@ -66,11 +59,10 @@ export class CalculationService {
 
         const excise = baseRate * (engineVolume / 1000) * age;
 
-        // 3. ПДВ (20% від суми: ціна + мито + акциз)
         const vat = (Number(auctionPrice) + importDuty + excise) * 0.20;
 
         const totalCustoms = importDuty + excise + vat;
-        const serviceFee = 500; // Твоя фіксована комісія
+        const serviceFee = 500; 
 
         const totalInUkraine =
             Number(auctionPrice) +

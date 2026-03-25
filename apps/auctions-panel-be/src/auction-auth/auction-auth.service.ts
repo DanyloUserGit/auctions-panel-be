@@ -17,6 +17,7 @@ export class AuctionAuthService {
     try {
       return await this.prisma.auctionAuth.create({
         data: {
+          title:dto.title,
           email: dto.email,
           password: hashedPassword,
           auctionId: dto.auctionId,

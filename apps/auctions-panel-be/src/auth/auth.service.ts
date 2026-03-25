@@ -58,6 +58,10 @@ export class AuthService {
       throw new NotFoundException('Користувача не знайдено');
     }
 
+    if(existing.isBlocked){
+      throw new ForbiddenException('Користувача заблоковано');
+    }
+
     const isValidPass = await verifyPassword(existing.password, user.password);
     if (!isValidPass) {
       throw new ForbiddenException('Паролі не співпадають');
