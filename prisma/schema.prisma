@@ -188,6 +188,7 @@ model RefreshToken {
 
 model AuctionAuth {
   id       String @id @default(uuid()) @db.Uuid()
+  title    String
   email    String
   password String
 
@@ -260,10 +261,10 @@ model AuctionGroup {
   auctions Auction[]
   sessions Session[]
 
-  lastActivity   DateTime?
+  lastActivity DateTime?
 
-  users User[] @relation("GroupParticipants")
-  allowedProfileFields  String[]  @default(["firstName", "lastName", "phone", "city"])
+  users                User[]   @relation("GroupParticipants")
+  allowedProfileFields String[] @default(["firstName", "lastName", "phone", "city"])
 
   AdminId                       String?                        @unique @db.Uuid()
   Admin                         User?                          @relation("Administrator", fields: [AdminId], references: [id])
@@ -297,7 +298,7 @@ model ForbiddenSelector {
   auctionId String  @db.Uuid
   auction   Auction @relation(fields: [auctionId], references: [id])
 
-  isBuyAction Boolean  @default(false)
+  isBuyAction Boolean @default(false)
 
   @@map("forbidden_selectors")
 }
