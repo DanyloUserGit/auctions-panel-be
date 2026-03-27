@@ -11,7 +11,11 @@ export class BalanceController {
     }
 
     @Get('data')
-    async getBalances(@Query('db') db: string, @Query('client') client: string) {
-        return this.balanceService.getBalances(db, client);
+    async getBalances(
+        @Query('db') db: string,
+        @Query('client') client: string,
+        @Query('asof') asof?: string 
+    ) {
+        return this.balanceService.getBalances(db, client, asof);
     }
 }

@@ -91,11 +91,12 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
   @SubscribeMessage('webrtc_signal')
   handleWebRtcSignal(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { sessionId: string; signalData: any; width: number; height: number }
+    @MessageBody() payload: { userId:string, sessionId: string; signalData: any; width: number; height: number }
   ) {
     // ДОДАНО .subscribe() !!!
     this.rabbitClient
       .emit('webrtc_signal_to_worker', {
+        userId: payload.userId,
         sessionId: payload.sessionId,
         clientId: client.id,
         signalData: payload.signalData,

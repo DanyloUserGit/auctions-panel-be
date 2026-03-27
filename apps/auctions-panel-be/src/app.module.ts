@@ -24,6 +24,7 @@ import { CalculationModule } from './calculation/calculation.module';
 import { BalanceModule } from './balance/balance.module';
 import { ProcessesModule } from './processes/processes.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     BalanceModule,
     ProcessesModule,
     AnalyticsModule,
+    OrdersModule,
   ],
   providers: [
     {

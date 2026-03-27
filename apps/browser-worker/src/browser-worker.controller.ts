@@ -20,6 +20,7 @@ export class BrowserWorkerController {
 
     try {
       await this.browserService.launchSession(
+        data.userId,
         data.sessionId,
         data.auctionUrl,
         { width: data.width, height: data.height },
@@ -64,6 +65,7 @@ export class BrowserWorkerController {
     try {
       if (data.signalData.type === 'offer') {
         const answer = await this.webrtcService.handleOffer(
+          data.userId,
           data.sessionId,
           data.clientId,
           data.signalData,
