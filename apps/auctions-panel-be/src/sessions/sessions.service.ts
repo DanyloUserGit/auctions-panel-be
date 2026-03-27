@@ -227,7 +227,7 @@ export class SessionsService implements OnModuleInit {
 
       // 3. Запускаємо Playwright ТІЛЬКИ якщо він був реально зупинений
       if (wasInactive) {
-        this.startBrowserWorker(
+        this.startBrowserWorker(userId,
           session.id, auction.url, width, height, authData,
           allowedRoutesArr, forbiddenSelectorsArr, forbiddenRoutesArr
         );
@@ -254,7 +254,7 @@ export class SessionsService implements OnModuleInit {
         }, false)
       }
       this.startBrowserWorker(
-        session.id, auction.url, width, height, authData,
+        userId, session.id, auction.url, width, height, authData,
         allowedRoutesArr, forbiddenSelectorsArr, forbiddenRoutesArr
       );
     }
@@ -262,7 +262,7 @@ export class SessionsService implements OnModuleInit {
     return session;
   }
 
-  private startBrowserWorker(sessionId: string,
+  private startBrowserWorker(userId:string, sessionId: string,
     auctionUrl: string,
     width: number,
     height: number,
@@ -272,6 +272,7 @@ export class SessionsService implements OnModuleInit {
     forbiddenRoutes: string[]) {
     this.rabbitClient
       .emit('start_browser_session', {
+        userId,
         sessionId,
         auctionUrl,
         width,

@@ -9,7 +9,6 @@ export class BalanceService {
     async getClients(dbName: string): Promise<string[]> {
         const pool = await this.dbManager.getConnection(dbName);
 
-        // Робимо швидку вибірку тільки унікальних замовників
         const [rows]: any = await pool.execute(
             `SELECT DISTINCT zamovnyk FROM transport_payments 
        WHERE zamovnyk IS NOT NULL AND zamovnyk != '' 
@@ -20,25 +19,33 @@ export class BalanceService {
     }
 
     // 2. Отримання даних балансу
-    async getBalances(dbName: string, clientFilter?: string) {
+    async getBalances(dbName: string, clientFilter?: string, asof?: string) {
         const pool = await this.dbManager.getConnection(dbName);
 
-        // Вибираємо тільки ті колонки, які існують і нам потрібні
+        // Використовуємо WHERE 1=1 для зручного додавання умов
         let query = `SELECT id, marka_model, numer_vin, zamovnyk, to_pay_usd, to_pay_eur, to_pay_pln, to_pay_uah, extra_notes, transport_date 
-                 FROM transport_payments`;
+                 FROM transport_payments WHERE 1=1`;
         const params: any[] = [];
 
         // Фільтр по клієнту
         if (clientFilter && clientFilter !== 'ALL') {
-            query += ` WHERE zamovnyk = ?`;
+            query += ` AND zamovnyk = ?`;
             params.push(clientFilter);
         }
 
-        query += ` ORDER BY transport_date DESC`;
+        // Фільтр "Станом на"
+        if (asof) {
+            query += ` AND transport_date <= ?`;
+            params.push(asof);
+        }
+
+        // ВАЖЛИВО: Додано сортування по id DESC для стабільності розрахунку балансу
+        query += ` ORDER BY transport_date DESC, id DESC`;
         const [rows]: any = await pool.execute(query, params);
 
         const clientsData: Record<string, any> = {};
 
+        // КРОК 1: Формуємо базові записи та рахуємо загальний підсумок (GRAND TOTAL)
         for (const row of rows) {
             const clientName = row.zamovnyk || 'Невідомий клієнт';
 
@@ -53,33 +60,65 @@ export class BalanceService {
                 };
             }
 
-            // Визначаємо, чи це нарахування чи списання
             const notes = (row.extra_notes || '').toLowerCase();
             const isPlus = notes.startsWith('привезли') || notes.startsWith('повернення');
             const multiplier = isPlus ? 1 : -1;
 
-            // Суми з колонок to_pay_*
             const usd = Number(row.to_pay_usd || 0);
             const eur = Number(row.to_pay_eur || 0);
             const pln = Number(row.to_pay_pln || 0);
             const uah = Number(row.to_pay_uah || 0);
 
-            // Оновлюємо загальний баланс клієнта
-            clientsData[clientName].totalUsd += usd * multiplier;
-            clientsData[clientName].totalEur += eur * multiplier;
-            clientsData[clientName].totalPln += pln * multiplier;
-            clientsData[clientName].totalUah += uah * multiplier;
+            // Обчислюємо ефект конкретної операції (+ або -)
+            const effectUsd = usd * multiplier;
+            const effectEur = eur * multiplier;
+            const effectPln = pln * multiplier;
+            const effectUah = uah * multiplier;
 
-            // Додаємо запис для деталізації на фронтенді
+            // Додаємо до загального підсумку
+            clientsData[clientName].totalUsd += effectUsd;
+            clientsData[clientName].totalEur += effectEur;
+            clientsData[clientName].totalPln += effectPln;
+            clientsData[clientName].totalUah += effectUah;
+
             clientsData[clientName].records.push({
                 id: row.id,
-                vin: row.numer_vin,      // підставляємо точну назву колонки
-                model: row.marka_model,  // підставляємо точну назву колонки
+                vin: row.numer_vin,
+                model: row.marka_model,
                 date: row.transport_date,
-                usd, eur, pln, uah,
                 notes: row.extra_notes,
-                isPlus
+                isPlus,
+                // Зберігаємо ефект для фронту (наприклад, -8607.83 €)
+                effectUsd, effectEur, effectPln, effectUah
             });
+        }
+
+        // КРОК 2: Розрахунок рухомого балансу (Running Balance) як в старому PHP
+        // Оскільки записи відсортовані DESC (від найновіших до найстаріших),
+        // ми беремо фінальний баланс і віднімаємо від нього ефект кожної операції,
+        // рухаючись вниз по історії.
+        for (const clientName in clientsData) {
+            const client = clientsData[clientName];
+            
+            let currentUsd = client.totalUsd;
+            let currentEur = client.totalEur;
+            let currentPln = client.totalPln;
+            let currentUah = client.totalUah;
+
+            for (const record of client.records) {
+                // Записуємо баланс на момент ПІСЛЯ цієї операції
+                record.balanceUsd = currentUsd;
+                record.balanceEur = currentEur;
+                record.balancePln = currentPln;
+                record.balanceUah = currentUah;
+
+                // Віднімаємо ефект цієї операції, щоб отримати баланс ДО неї
+                // для наступного (старішого) запису в циклі
+                currentUsd -= record.effectUsd;
+                currentEur -= record.effectEur;
+                currentPln -= record.effectPln;
+                currentUah -= record.effectUah;
+            }
         }
 
         return Object.values(clientsData);

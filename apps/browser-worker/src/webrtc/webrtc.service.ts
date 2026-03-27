@@ -18,6 +18,7 @@ export class WebrtcService {
   constructor(private browserService: BrowserService) { }
 
   async handleOffer(
+    userId:string,
     sessionId: string,
     clientId: string,
     offer: any,
@@ -103,7 +104,7 @@ export class WebrtcService {
 
     // 2. 🛑 ВИПРАВЛЕННЯ: Запускаємо Playwright АСИНХРОННО (без await!)
     // Це дозволить миттєво повернути Answer клієнту, поки сторінка вантажиться
-    this.browserService.addClientPage(sessionId, clientId, (frameBuffer) => {
+    this.browserService.addClientPage(userId, sessionId, clientId, (frameBuffer) => {
       const ffmpegProcess = this.ffmpegProcesses.get(clientKey);
       if (ffmpegProcess && ffmpegProcess.stdin && ffmpegProcess.stdin.writable) {
         // Щоб FFmpeg не впав від переповнення буфера (EPIPE)

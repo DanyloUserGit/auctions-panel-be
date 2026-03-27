@@ -1,9 +1,11 @@
 // apps/browser-worker/src/browser/browser.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
 import * as path from 'path';
 import { BrowserContext, chromium, Page } from 'playwright';
 import UserAgent from 'user-agents';
 import { AuthStrategyRegistry } from './auth/auth.registry';
+import { LogSeverity, NotificationEventType, SessionEventType } from './types';
 
 interface SessionConfig {
   url: string;
@@ -20,7 +22,7 @@ interface ActiveSession {
 
 @Injectable()
 export class BrowserService {
-  constructor(private readonly authRegistry: AuthStrategyRegistry) { }
+  constructor(private readonly authRegistry: AuthStrategyRegistry, @Inject('API_CLIENT') private apiClient: ClientProxy) { }
 
   private readonly logger = new Logger(BrowserService.name);
 
@@ -52,6 +54,7 @@ export class BrowserService {
   }
 
   async launchSession(
+    userId: string,
     sessionId: string,
     url: string,
     viewport: { width: number; height: number },
@@ -94,7 +97,23 @@ export class BrowserService {
         const isForbidden = safeForbiddenRoutes.some(fr => reqUrl.includes(fr));
 
         if (isForbidden) {
-          this.logger.debug(`[Browser] Блокування переходу (заборонений роут): ${reqUrl}`);
+          this.apiClient.emit('notification.send', {
+            userId: userId,
+            typeName: NotificationEventType.WORKER_ERROR,
+            content: {
+              subject: `[Browser] Блокування переходу`,
+              body: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
+            },
+            sendEmail: true,
+          });
+          this.apiClient.emit('session.log.event', {
+            sessionId,
+            userId,
+            eventType: SessionEventType.ForbiddenAction,
+            severity: LogSeverity.Critical,
+            message: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
+            isIncident: true
+          });
           return route.abort('accessdenied');
         }
       }
@@ -137,7 +156,23 @@ export class BrowserService {
             if (isForbiddenUrl(link.href)) {
               e.preventDefault();
               e.stopPropagation();
-              console.warn(`[Блокування] Перехід на ${link.href} заборонено.`);
+              this.apiClient.emit('notification.send', {
+                userId: userId,
+                typeName: NotificationEventType.WORKER_ERROR,
+                content: {
+                  subject: `[Browser] Блокування переходу`,
+                  body: `[Browser] Блокування переходу (заборонений роут): ${link.href}`,
+                },
+                sendEmail: true,
+              });
+              this.apiClient.emit('session.log.event', {
+                sessionId,
+                userId,
+                eventType: SessionEventType.ForbiddenAction,
+                severity: LogSeverity.Critical,
+                message: `[Browser] Блокування переходу (заборонений роут): ${link.href}`,
+                isIncident: true
+              });
             }
           }
         }, true);
@@ -207,25 +242,90 @@ export class BrowserService {
     if (url) {
       const strategy = this.authRegistry.get(url);
       if (strategy) {
-        this.logger.log(`[BrowserService] Запуск автологіну через: ${strategy.url}`);
+        this.apiClient.emit('notification.send', {
+          userId: userId,
+          typeName: NotificationEventType.SESSION_STARTED,
+          content: {
+            subject: `[BrowserService] Запуск автологіну`,
+            body: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
+          },
+          sendEmail: false,
+        });
+        this.apiClient.emit('session.log.event', {
+          sessionId,
+          userId,
+          eventType: SessionEventType.Other,
+          severity: LogSeverity.Info,
+          message: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
+          isIncident: false
+        });
         const loginPage = await context.newPage();
         try {
           await strategy.login(loginPage, authData);
         } catch (error) {
-          this.logger.error(`[BrowserService] Помилка автологіну:`, error);
+          this.apiClient.emit('notification.send', {
+            userId: userId,
+            typeName: NotificationEventType.WORKER_ERROR,
+            content: {
+              subject: `[BrowserService] Помилка автологіну`,
+              body: `[BrowserService] Помилка автологіну:`, error,
+            },
+            sendEmail: false,
+          });
+          this.apiClient.emit('session.log.event', {
+            sessionId,
+            userId,
+            eventType: SessionEventType.SessionError,
+            severity: LogSeverity.Warning,
+            message: `[BrowserService] Помилка автологіну:`, error,
+            isIncident: false
+          });
         } finally {
           await loginPage.close();
         }
       } else {
-        this.logger.warn(`[BrowserService] Стратегію логіну '${url}' не знайдено!`);
+        this.apiClient.emit('notification.send', {
+          userId: userId,
+          typeName: NotificationEventType.WORKER_ERROR,
+          content: {
+            subject: `[BrowserService] Стратегія логіну`,
+            body: `[BrowserService] Стратегію логіну '${url}' не знайдено!`,
+          },
+          sendEmail: false,
+        });
+        this.apiClient.emit('session.log.event', {
+          sessionId,
+          userId,
+          eventType: SessionEventType.SessionError,
+          severity: LogSeverity.Warning,
+          message: `[BrowserService] Стратегію логіну '${url}' не знайдено!`,
+          isIncident: false
+        });
       }
     }
 
-    this.logger.log(`[BrowserService] Context для ${sessionId} успішно створено.`);
+    this.apiClient.emit('notification.send', {
+      userId: userId,
+      typeName: NotificationEventType.SESSION_STARTED,
+      content: {
+        subject: `[BrowserService] Context успішно створено.`,
+        body: `[BrowserService] Context для ${sessionId} успішно створено.`,
+      },
+      sendEmail: false,
+    });
+    this.apiClient.emit('session.log.event', {
+      sessionId,
+      userId,
+      eventType: SessionEventType.Other,
+      severity: LogSeverity.Info,
+      message: `[BrowserService] Context для ${sessionId} успішно створено.`,
+      isIncident: false
+    });
     return context;
   }
 
   async addClientPage(
+    userId,
     sessionId: string,
     clientId: string,
     onFrame: (buffer: Buffer) => void
@@ -267,7 +367,23 @@ export class BrowserService {
           const isForbidden = normalizedForbiddenRoutes.some(fr => currentNorm.includes(fr));
 
           if (isForbidden) {
-            this.logger.warn(`[BrowserService] Відловлено заборонений роут: ${currentUrl}. Відкат.`);
+            this.apiClient.emit('notification.send', {
+              userId: userId,
+              typeName: NotificationEventType.WORKER_ERROR,
+              content: {
+                subject: `[BrowserService] Заборонений роут`,
+                body: `[BrowserService] Відловлено заборонений роут: ${currentUrl}.`,
+              },
+              sendEmail: true,
+            });
+            this.apiClient.emit('session.log.event', {
+              sessionId,
+              userId,
+              eventType: SessionEventType.ForbiddenAction,
+              severity: LogSeverity.Critical,
+              message: `[BrowserService] Відловлено заборонений роут: ${currentUrl}.`,
+              isIncident: true
+            });
             try {
               // Відкочуємо сторінку назад або повертаємо на стартову
               const response = await page.goBack({ waitUntil: 'domcontentloaded' });
@@ -306,7 +422,23 @@ export class BrowserService {
 
     this.frameIntervals.set(clientKey, interval);
 
-    this.logger.log(`[BrowserService] Вкладку для клієнта ${clientId} створено. Насос кадрів запущено.`);
+    this.apiClient.emit('notification.send', {
+      userId: userId,
+      typeName: NotificationEventType.SESSION_STARTED,
+      content: {
+        subject: `[BrowserService] Вкладку створено`,
+        body: `[BrowserService] Вкладку для користувача з id: ${userId} створено.`,
+      },
+      sendEmail: false,
+    });
+    this.apiClient.emit('session.log.event', {
+      sessionId,
+      userId,
+      eventType: SessionEventType.ForbiddenAction,
+      severity: LogSeverity.Critical,
+      message: `[BrowserService] Вкладку для користувача з id: ${userId} створено.`,
+      isIncident: true
+    });
     return page;
   }
 
