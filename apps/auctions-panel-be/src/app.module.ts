@@ -25,6 +25,8 @@ import { BalanceModule } from './balance/balance.module';
 import { ProcessesModule } from './processes/processes.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { OrdersModule } from './orders/orders.module';
+import { InStockModule } from './in-stock/in-stock.module';
+import { WonCarsModule } from './won-cars/won-cars.module';
 
 @Module({
   imports: [
@@ -62,6 +64,8 @@ import { OrdersModule } from './orders/orders.module';
     ProcessesModule,
     AnalyticsModule,
     OrdersModule,
+    InStockModule,
+    WonCarsModule,
   ],
   providers: [
     {

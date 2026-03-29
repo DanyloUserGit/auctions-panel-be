@@ -1,305 +1,174 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ExternalDbManager } from '../client-db/client-db.service';
 
 @Injectable()
 export class AnalyticsService {
+    private readonly logger = new Logger(AnalyticsService.name);
+
     constructor(private readonly dbManager: ExternalDbManager) { }
 
-    async getCarAnalytics(dbName: string, carId: number) {
+    async getMarketAnalytics(dbName: string, vin: string) {
+        if (!vin) throw new BadRequestException('VIN-код є обов’язковим для пошуку');
+
         const pool = await this.dbManager.getConnection(dbName);
 
-        // 1. Отримуємо дані по нашому авто
-        const [carRows]: any = await pool.query(
-            `SELECT id, brand_id, model_id, fuel, transmission, eng_power_kw, eng_capacity, mileage, first_on_road, price 
-             FROM cars WHERE id = ?`,
-            [carId]
-        );
+        try {
+            const [carRows]: any = await pool.query(`
+                SELECT 
+                    c.brand_id, 
+                    c.model_id, 
+                    c.chassis, 
+                    c.price, 
+                    c.mileage,
+                    b.name as brand_name, 
+                    m.name as model_name
+                FROM cars c
+                LEFT JOIN brands b ON c.brand_id = b.id
+                LEFT JOIN models m ON c.model_id = m.id
+                WHERE c.chassis = ?
+                ORDER BY c.countdown DESC 
+                LIMIT 1
+            `, [vin]);
 
-        if (!carRows || carRows.length === 0) {
-            throw new NotFoundException('Автомобіль не знайдено');
-        }
-
-        const car = carRows[0];
-        const carYear = this.extractMarketYear(car.first_on_road);
-
-        // 2. Отримуємо "пул" аналогів з бази
-        const [poolRows]: any = await pool.query(
-            `SELECT id, brand_id, model_id, fuel, transmission, eng_power_kw, eng_capacity, mileage, first_on_road, price, chassis
-             FROM cars 
-             WHERE brand_id = ? AND model_id = ? AND price > 0`,
-            [car.brand_id, car.model_id]
-        );
-
-        let rawRows = this.deduplicateMarketRows(poolRows);
-
-        // 3. Фільтруємо пул за етапами (stage)
-        const stage = { kw_tolerance: 10, capacity_tolerance: 200, max_mileage_diff: 50000 };
-        const filteredRows = this.filterMarketPoolByStage(car, rawRows, stage);
-
-        if (filteredRows.length < 3) {
-            return { market_has_analytics: false, market_count: 0 };
-        }
-
-        const rawCount = filteredRows.length;
-
-        // 4. Видаляємо аномальні ціни (викиди)
-        const { clean_rows, removed_rows } = this.detectAndTrimOutliers(filteredRows);
-
-        let validRows: any[] = clean_rows;
-        if (validRows.length < 6) {
-            validRows = filteredRows;
-        }
-
-        validRows.sort((a, b) => Number(a.price) - Number(b.price));
-        const prices = validRows.map(r => Number(r.price));
-        const count = prices.length;
-
-        if (count < 3) {
-            return { market_has_analytics: false, market_count: 0 };
-        }
-
-        // 5. Розрахунок маркерів ринку
-        const p20 = this.percentileValue(prices, 0.20);
-        const p25 = this.percentileValue(prices, 0.25);
-        const median = this.percentileValue(prices, 0.50);
-        const p75 = this.percentileValue(prices, 0.75);
-        const p80 = this.percentileValue(prices, 0.80);
-        const min = prices[0];
-        const max = prices[count - 1];
-        const avg = prices.reduce((a, b) => a + b, 0) / count;
-
-        const marketFloor = p20;
-
-        // 6. Розрахунок прогнозованої ціни по пробігу
-        const predictedPriceByMileage = this.getPredictedPriceByMileage(validRows, car.mileage, car);
-
-        const carPrice = Number(car.price);
-
-        // Явне вказування типів (number | null) замість неявного null
-        let diffPct: number | null = null;
-        let zone = 0;
-        let zoneLabel = 'Невідомо';
-        let zoneColor = '#9ca3af';
-
-        if (median !== null && median > 0 && carPrice > 0) {
-            diffPct = ((carPrice - median) / median) * 100;
-
-            // Перевіряємо, що p25 і p75 не є null перед порівнянням
-            if (p25 !== null && carPrice <= p25) {
-                zone = 1; zoneLabel = 'Низ ринку'; zoneColor = '#16a34a'; // зелений
-            } else if (carPrice <= median) {
-                zone = 2; zoneLabel = 'Нижче медіани'; zoneColor = '#ca8a04'; // жовтий
-            } else if (p75 !== null && carPrice <= p75) {
-                zone = 3; zoneLabel = 'Вище медіани'; zoneColor = '#f97316'; // оранжевий
-            } else {
-                zone = 4; zoneLabel = 'Верх ринку'; zoneColor = '#dc2626'; // червоний
+            if (!carRows || carRows.length === 0) {
+                throw new NotFoundException(`Автомобіль з VIN ${vin} не знайдено`);
             }
+
+            const targetCar = carRows[0];
+
+            // 2. Формуємо $prices_list (усі авто цього бренду та моделі для побудови таблиці та графіків)
+            // Поля точно відповідають вимогам таблиці: Тип, Авто, Пробіг, Перша реєстрація, Потужність, Ціна, Дата аукціону
+            const [marketRows]: any = await pool.query(`
+                SELECT 
+                    c.id,
+                    a.type as auction_type,
+                    c.price,
+                    c.mileage,
+                    c.countdown as countdown_ts,
+                    c.first_on_road as first_on_road_ts,
+                    b.name as brand_name,
+                    m.name as model_name,
+                    c.eng_capacity,
+                    c.transmission,
+                    c.characteristics,
+                    c.report,
+                    c.photos,
+                    c.chassis,
+                    c.eng_power_hp,
+                    c.eng_power_kw,
+                    c.country_id
+                FROM cars c
+                LEFT JOIN brands b ON b.id = c.brand_id
+                LEFT JOIN models m ON m.id = c.model_id
+                LEFT JOIN auctions a ON a.id = c.auction_id
+                WHERE c.brand_id = ? 
+                  AND c.model_id = ? 
+                  AND c.price > 0
+                ORDER BY c.countdown DESC
+            `, [targetCar.brand_id, targetCar.model_id]);
+
+            // 3. Історія продажів саме цього VIN (для блоку "Блок продажів цього VIN" з .tpl)
+            const vinSales = marketRows.filter(row => row.chassis === vin);
+
+            return {
+                targetCar: {
+                    chassis: targetCar.chassis,
+                    price: targetCar.price,
+                    mileage: targetCar.mileage,
+                    brand_name: targetCar.brand_name,
+                    model_name: targetCar.model_name
+                },
+                vinSales,
+                pricesList: marketRows // Цей масив замінить $prices_list на фронтенді
+            };
+
+        } catch (error) {
+            this.logger.error(`Помилка аналітики для VIN ${vin}: ${error.message}`);
+            if (error instanceof NotFoundException) throw error;
+            throw new BadRequestException('Помилка завантаження аналітичних даних');
         }
-
-        // Явне вказування типів (number | null)
-        let vsPredictedDiff: number | null = null;
-        let vsPredictedDiffPct: number | null = null;
-
-        if (predictedPriceByMileage !== null && predictedPriceByMileage > 0 && carPrice > 0) {
-            vsPredictedDiff = carPrice - predictedPriceByMileage;
-            vsPredictedDiffPct = (vsPredictedDiff / predictedPriceByMileage) * 100;
-        }
-
-        return {
-            carId: car.id,
-            market_has_analytics: true,
-            market_count: count,
-            market_count_raw: rawCount,
-            market_outliers_removed: removed_rows.length,
-            market_floor: marketFloor,
-            market_min: min,
-            market_p25: p25,
-            market_median: median,
-            market_p75: p75,
-            market_max: max,
-            market_avg: avg,
-            market_zone: zone,
-            market_zone_label: zoneLabel,
-            market_zone_color: zoneColor,
-            market_diff_pct: diffPct,
-            market_predicted_price_by_mileage: predictedPriceByMileage,
-            market_vs_predicted_diff: vsPredictedDiff,
-            market_vs_predicted_diff_pct: vsPredictedDiffPct,
-            current_display_price: carPrice
-        };
     }
 
-    // --- ДОПОМІЖНІ ФУНКЦІЇ ---
+async getAuctionTypeAnalytics(dbName: string, vin: string) {
+        if (!vin) throw new BadRequestException('VIN-код є обов’язковим для пошуку');
+        const pool = await this.dbManager.getConnection(dbName);
 
-    private percentileValue(values: number[], p: number): number | null {
-        if (!values || values.length === 0) return null;
-        const sorted = [...values].sort((a, b) => a - b);
-        const count = sorted.length;
-        if (count === 1) return sorted[0];
+        try {
+            const [carRows]: any = await pool.query(
+                'SELECT brand_id, model_id FROM cars WHERE chassis = ? LIMIT 1',
+                [vin]
+            );
 
-        const index = (count - 1) * p;
-        const low = Math.floor(index);
-        const high = Math.ceil(index);
-
-        if (low === high) return sorted[low];
-
-        const weight = index - low;
-        return sorted[low] + (sorted[high] - sorted[low]) * weight;
-    }
-
-    private normalizeTransmissionForMarket(value: string): string {
-        const val = (value || '').trim().toLowerCase();
-        if (val === '') return '';
-        if (val.includes('auto') || val.includes('dct') || val.includes('cvt') || val.includes('bva')) return 'automatic';
-        if (val.includes('man') || val.includes('mech')) return 'manual';
-        return val;
-    }
-
-    private normalizeFuelForMarket(value: string): string {
-        const val = (value || '').trim().toLowerCase();
-        if (val === '') return '';
-        if (val.includes('electric') || val.includes('bev')) return 'electric';
-        if (val.includes('hybrid/diesel') || val.includes('mhev diesel') || val.includes('hev diesel')) return 'hybrid_diesel';
-        if (val.includes('hybrid') || val.includes('phev') || val.includes('mhev') || val.includes('hev')) return 'hybrid_gasoline';
-        if (val.includes('diesel') || val.includes('crdi') || val.includes('tdi') || val.includes('dci')) return 'diesel';
-        if (val.includes('gasoline') || val.includes('petrol') || val.includes('benz') || val.includes('t-gdi') || val.includes('gdi')) return 'gasoline';
-        return val;
-    }
-
-    private extractMarketYear(timestamp: number | string): number {
-        const ts = Number(timestamp);
-        if (ts <= 0) return 0;
-        const year = new Date(ts * 1000).getFullYear();
-        return (year >= 1990 && year <= 2100) ? year : 0;
-    }
-
-    private makeMarketFingerprint(row: any): string {
-        if (row.chassis && String(row.chassis).trim() !== '') {
-            return 'vin:' + String(row.chassis).trim();
-        }
-        const parts = [
-            Number(row.brand_id) || 0,
-            Number(row.model_id) || 0,
-            Number(row.eng_power_kw) || 0,
-            Number(row.eng_capacity) || 0,
-            Number(row.mileage) || 0,
-            Math.round(Number(row.price)) || 0,
-            Number(row.first_on_road) || 0,
-        ];
-        return 'fp:' + parts.join('|');
-    }
-
-    private deduplicateMarketRows(rows: any[]): any[] {
-        if (!rows || rows.length === 0) return [];
-        const unique = new Map<string, any>();
-        for (const row of rows) {
-            const key = this.makeMarketFingerprint(row);
-            if (!unique.has(key)) {
-                unique.set(key, row);
+            if (!carRows || carRows.length === 0) {
+                throw new NotFoundException(`Автомобіль з VIN ${vin} не знайдено`);
             }
+
+            const { brand_id, model_id } = carRows[0];
+
+            // Працюємо виключно з таблицею cars (припускаємо, що поле називається auction_id або auction_type)
+            // Якщо в базі колонка називається auction_id, заміни c.auction_type на c.auction_id
+            const [auctionStats]: any = await pool.query(`
+                SELECT 
+                    c.auction_type,
+                    COUNT(c.id) as total_cars,
+                    ROUND(AVG(c.price), 0) as avg_price,
+                    MIN(c.price) as min_price,
+                    MAX(c.price) as max_price
+                FROM cars c
+                WHERE c.brand_id = ? 
+                  AND c.model_id = ? 
+                  AND c.price > 0
+                GROUP BY c.auction_type
+                ORDER BY total_cars DESC
+            `, [brand_id, model_id]);
+
+            return auctionStats;
+
+        } catch (error) {
+            this.logger.error(`Помилка аналітики аукціонів: ${error.message}`);
+            throw new BadRequestException('Помилка завантаження даних по аукціонах');
         }
-        return Array.from(unique.values());
     }
 
-    private filterMarketPoolByStage(car: any, pool: any[], stage: any): any[] {
-        const carFuel = this.normalizeFuelForMarket(car.fuel);
-        const carTrans = this.normalizeTransmissionForMarket(car.transmission);
-        const carKw = Number(car.eng_power_kw) || 0;
-        const carYear = this.extractMarketYear(car.first_on_road);
+    // НОВИЙ МЕТОД: Аналітика за країнами походження
+    async getCountryAnalytics(dbName: string, vin: string) {
+        if (!vin) throw new BadRequestException('VIN-код є обов’язковим для пошуку');
+        const pool = await this.dbManager.getConnection(dbName);
 
-        return pool.filter(row => {
-            const rowFuel = this.normalizeFuelForMarket(row.fuel);
-            const rowTrans = this.normalizeTransmissionForMarket(row.transmission);
-            const rowKw = Number(row.eng_power_kw) || 0;
-            const rowYear = this.extractMarketYear(row.first_on_road);
+        try {
+            const [carRows]: any = await pool.query(
+                'SELECT brand_id, model_id FROM cars WHERE chassis = ? LIMIT 1',
+                [vin]
+            );
 
-            if (carYear > 0 && rowYear > 0 && Math.abs(rowYear - carYear) > 1) return false;
-            if (carFuel && rowFuel && carFuel !== rowFuel) return false;
-            if (carTrans && rowTrans && carTrans !== rowTrans) return false;
-            if (carKw > 0 && rowKw > 0 && Math.abs(rowKw - carKw) > stage.kw_tolerance) return false;
-
-            return true;
-        });
-    }
-
-    private detectAndTrimOutliers(rows: any[]) {
-        if (!rows || rows.length === 0) return { clean_rows: [], removed_rows: [] };
-
-        const prices = rows.map(r => Number(r.price)).sort((a, b) => a - b);
-        const q1 = this.percentileValue(prices, 0.25) || 0;
-        const q3 = this.percentileValue(prices, 0.75) || 0;
-        const iqr = q3 - q1;
-
-        const lowBound = q1 - 1.5 * iqr;
-        const highBound = q3 + 1.5 * iqr;
-
-        // Вказуємо тип any[] для масивів
-        const clean_rows: any[] = [];
-        const removed_rows: any[] = [];
-
-        for (const row of rows) {
-            const price = Number(row.price);
-            if (price >= lowBound && price <= highBound) {
-                clean_rows.push(row);
-            } else {
-                removed_rows.push(row);
+            if (!carRows || carRows.length === 0) {
+                throw new NotFoundException(`Автомобіль з VIN ${vin} не знайдено`);
             }
+
+            const { brand_id, model_id } = carRows[0];
+
+            // Забираємо JOIN, групуємо просто по country_id з таблиці cars
+            const [countryStats]: any = await pool.query(`
+                SELECT 
+                    c.country_id,
+                    COUNT(c.id) as total_cars,
+                    ROUND(AVG(c.price), 0) as avg_price,
+                    MIN(c.price) as min_price,
+                    MAX(c.price) as max_price
+                FROM cars c
+                WHERE c.brand_id = ? 
+                  AND c.model_id = ? 
+                  AND c.price > 0
+                  AND c.country_id IS NOT NULL
+                GROUP BY c.country_id
+                ORDER BY total_cars DESC
+            `, [brand_id, model_id]);
+
+            return countryStats;
+
+        } catch (error) {
+            this.logger.error(`Помилка аналітики країн: ${error.message}`);
+            throw new BadRequestException('Помилка завантаження даних по країнах');
         }
-
-        return { clean_rows, removed_rows };
-    }
-
-    private getPredictedPriceByMileage(rows: any[], targetMileage: number, car: any): number | null {
-        targetMileage = Number(targetMileage);
-        if (targetMileage <= 0 || !rows || rows.length === 0) return null;
-
-        // Явно вказуємо інтерфейс масиву
-        const candidates: Array<{ price: number; mileage: number; mileage_diff: number; distance: number }> = [];
-
-        for (const row of rows) {
-            const price = Number(row.price);
-            const mileage = Number(row.mileage);
-            if (price <= 0 || mileage <= 0) continue;
-
-            candidates.push({
-                price: price,
-                mileage: mileage,
-                mileage_diff: Math.abs(mileage - targetMileage),
-                distance: Math.abs(mileage - targetMileage) / 1000
-            });
-        }
-
-        candidates.sort((a, b) => a.mileage_diff - b.mileage_diff);
-
-        const selected = candidates.slice(0, 15);
-        if (selected.length < 3) return null;
-
-        // Явно вказуємо інтерфейс масиву
-        const points: Array<{ price: number; weight: number }> = [];
-
-        for (const candidate of selected) {
-            let weight = 1 / Math.max(1, candidate.distance);
-            if (candidate.mileage_diff <= 15000) weight *= 1.35;
-            else if (candidate.mileage_diff <= 30000) weight *= 1.20;
-            else if (candidate.mileage_diff <= 50000) weight *= 1.05;
-
-            points.push({ price: candidate.price, weight: weight });
-        }
-
-        points.sort((a, b) => a.price - b.price);
-        const weightTotal = points.reduce((sum, p) => sum + p.weight, 0);
-
-        let cumulativeWeight = 0;
-        let weightedMedian = points[0].price;
-
-        for (const point of points) {
-            cumulativeWeight += point.weight;
-            if (cumulativeWeight >= weightTotal / 2) {
-                weightedMedian = point.price;
-                break;
-            }
-        }
-
-        return Math.round(weightedMedian);
     }
 }
