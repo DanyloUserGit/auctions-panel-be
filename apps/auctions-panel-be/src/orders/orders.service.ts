@@ -39,14 +39,24 @@ export class OrdersService {
         return rows[0];
     }
 
-    // Створення нового замовлення
     async create(dbName: string, createOrderDto: CreateOrderDto) {
         const pool = await this.dbManager.getConnection(dbName);
-        const keys = Object.keys(createOrderDto);
-        const values = Object.values(createOrderDto);
+
+        // Створюємо копію об'єкта, щоб не мутувати оригінальний DTO
+        const dataToInsert = { ...createOrderDto };
+
+        // Перетворюємо ISO дату в формат MySQL (YYYY-MM-DD HH:MM:SS)
+        if (dataToInsert['updated_at']) {
+            dataToInsert['updated_at'] = new Date(dataToInsert['updated_at'])
+                .toISOString()
+                .slice(0, 19)
+                .replace('T', ' ');
+        }
+
+        const keys = Object.keys(dataToInsert);
+        const values = Object.values(dataToInsert);
 
         const placeholders = keys.map(() => '?').join(', ');
-        // Виправлено order_requests на car_orders
         const sql = `INSERT INTO car_orders (${keys.join(', ')}) VALUES (${placeholders})`;
 
         const [result]: any = await pool.query(sql, values);
@@ -56,20 +66,29 @@ export class OrdersService {
     // Оновлення існуючого замовлення
     async update(dbName: string, id: number, updateOrderDto: UpdateOrderDto) {
         const pool = await this.dbManager.getConnection(dbName);
-        const keys = Object.keys(updateOrderDto);
+
+        const dataToUpdate = { ...updateOrderDto };
+
+        // Перетворюємо ISO дату в формат MySQL при оновленні
+        if (dataToUpdate['updated_at']) {
+            dataToUpdate['updated_at'] = new Date(dataToUpdate['updated_at'])
+                .toISOString()
+                .slice(0, 19)
+                .replace('T', ' ');
+        }
+
+        const keys = Object.keys(dataToUpdate);
 
         if (keys.length === 0) return this.findOne(dbName, id);
 
         const setClause = keys.map(key => `${key} = ?`).join(', ');
-        const values = [...Object.values(updateOrderDto), id];
+        const values = [...Object.values(dataToUpdate), id];
 
-        // Виправлено order_requests на car_orders
         const sql = `UPDATE car_orders SET ${setClause} WHERE id = ?`;
         await pool.query(sql, values);
 
         return this.findOne(dbName, id);
     }
-
     // Видалення
     async remove(dbName: string, id: number) {
         const pool = await this.dbManager.getConnection(dbName);
