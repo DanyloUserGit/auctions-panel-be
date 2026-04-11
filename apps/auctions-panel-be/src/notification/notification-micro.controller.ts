@@ -17,7 +17,7 @@ export class NotificationMicroController {
                 data.sendEmail
             );
         } catch (error) {
-            console.error(`Failed to process notification for user ${data.userId}:`, error.message);
+            console.error(`Failed to process notification for user ${data.userId}:`, error);
         }
     }
 }

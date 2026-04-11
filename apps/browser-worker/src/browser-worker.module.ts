@@ -5,6 +5,8 @@ import { BrowserService } from './browser-worker.service';
 import { WebrtcService } from './webrtc/webrtc.service';
 import { AuthStrategyRegistry } from './auth/auth.registry';
 import { CarmarketAyvensAuthStrategy } from './auth/strategies/carmarket.ayvens.strategy';
+import { Auto1Strategy } from './auth/strategies/auto1.strategy';
+import { AlcopaStrategy } from './auth/strategies/alcopa-auction.strategy';
 
 @Module({
   imports: [
@@ -23,13 +25,17 @@ import { CarmarketAyvensAuthStrategy } from './auth/strategies/carmarket.ayvens.
     ]),
   ],
   controllers: [BrowserWorkerController],
-  providers: [BrowserService, WebrtcService, AuthStrategyRegistry, CarmarketAyvensAuthStrategy],
+  providers: [BrowserService, WebrtcService, AuthStrategyRegistry, CarmarketAyvensAuthStrategy, Auto1Strategy, AlcopaStrategy],
 })
 export class BrowserWorkerModule {
   constructor(
     private registry: AuthStrategyRegistry,
     private carmarketAyvensAuthStrategy: CarmarketAyvensAuthStrategy,
+    private auto1Strategy: Auto1Strategy,
+    private alcopaStrategy: AlcopaStrategy
   ) {
     this.registry.register(this.carmarketAyvensAuthStrategy);
+    this.registry.register(this.auto1Strategy);
+    this.registry.register(this.alcopaStrategy);
   }
 }
