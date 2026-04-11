@@ -42,9 +42,12 @@ export class NotificationService {
             where: { userId, notificationType: { name: typeName } },
             include: { user: true, notificationType: true }
         });
-        console.log("Setting: ", setting)
+        console.log("Setting: ", setting);
         if (!setting) return;
-        console.log("Setting end")
+        console.log("Setting end");
+        if (setting.user?.email) {
+            content.body = content.body.replaceAll(userId, setting.user.email);
+        }
         const groupRequirement = setting.user.auctionGroupId
             ? await this.prisma.groupNotificationRequirement.findFirst({
                 where: { notificationTypeId: setting.notificationTypeId, groupId: setting.user.auctionGroupId }

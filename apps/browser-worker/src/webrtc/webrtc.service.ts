@@ -47,7 +47,7 @@ export class WebrtcService {
             action.y = Math.round(action.y * viewport.height);
           }
           // ОНОВЛЕНО: Передаємо clientId, щоб клікати по його власній вкладці
-          this.browserService.interact(sessionId, clientId, action);
+          this.browserService.interact(sessionId, clientId, userId, action);
         } catch (e) { }
       });
     });
@@ -111,7 +111,7 @@ export class WebrtcService {
         try {
           ffmpegProcess.stdin.write(frameBuffer);
         } catch (e) {
-          this.logger.debug(`Помилка запису кадру у FFmpeg: ${e.message}`);
+          this.logger.debug(`Помилка запису кадру у FFmpeg`);
         }
       }
     }).catch(e => this.logger.error(`Помилка створення вкладки для ${clientId}:`, e));

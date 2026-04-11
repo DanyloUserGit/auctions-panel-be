@@ -12,12 +12,14 @@ interface SessionConfig {
   viewport: { width: number; height: number };
   allowedRoutes: string[];
   forbiddenSelectors: string[];
-  forbiddenRoutes: string[]; // <-- Додано в інтерфейс
+  forbiddenRoutes: string[];
+  authData: { email: string; password: string };
 }
 
 interface ActiveSession {
   context: BrowserContext;
   config: SessionConfig;
+  interactiveLoginStarted?: boolean;
 }
 
 @Injectable()
@@ -235,53 +237,57 @@ export class BrowserService {
     // Зберігаємо сесію (додано forbiddenRoutes)
     this.sessions.set(sessionId, {
       context,
-      config: { url, viewport, allowedRoutes, forbiddenSelectors, forbiddenRoutes }
+      config: { url, viewport, allowedRoutes, forbiddenSelectors, forbiddenRoutes, authData }
     });
 
     // Логіка автологіну
     if (url) {
       const strategy = this.authRegistry.get(url);
       if (strategy) {
-        this.apiClient.emit('notification.send', {
-          userId: userId,
-          typeName: NotificationEventType.SESSION_STARTED,
-          content: {
-            subject: `[BrowserService] Запуск автологіну`,
-            body: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
-          },
-          sendEmail: false,
-        });
-        this.apiClient.emit('session.log.event', {
-          sessionId,
-          userId,
-          eventType: SessionEventType.Other,
-          severity: LogSeverity.Info,
-          message: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
-          isIncident: false
-        });
-        const loginPage = await context.newPage();
-        try {
-          await strategy.login(loginPage, authData);
-        } catch (error) {
+        if (strategy.isInteractive) {
+          this.logger.log(`[BrowserService] Логін для ${url} є інтерактивним. Відкладаємо до підключення клієнта.`);
+        } else {
           this.apiClient.emit('notification.send', {
             userId: userId,
-            typeName: NotificationEventType.WORKER_ERROR,
+            typeName: NotificationEventType.SESSION_STARTED,
             content: {
-              subject: `[BrowserService] Помилка автологіну`,
-              body: `[BrowserService] Помилка автологіну:`, error,
+              subject: `[BrowserService] Запуск автологіну`,
+              body: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
             },
             sendEmail: false,
           });
           this.apiClient.emit('session.log.event', {
             sessionId,
-            userId,
-            eventType: SessionEventType.SessionError,
-            severity: LogSeverity.Warning,
-            message: `[BrowserService] Помилка автологіну:`, error,
+            userId: userId,
+            eventType: SessionEventType.Other,
+            severity: LogSeverity.Info,
+            message: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
             isIncident: false
           });
-        } finally {
-          await loginPage.close();
+          const loginPage = await context.newPage();
+          try {
+            await strategy.login(loginPage, authData);
+          } catch (error) {
+            this.apiClient.emit('notification.send', {
+              userId: userId,
+              typeName: NotificationEventType.WORKER_ERROR,
+              content: {
+                subject: `[BrowserService] Помилка автологіну`,
+                body: `[BrowserService] Помилка автологіну:`, error,
+              },
+              sendEmail: false,
+            });
+            this.apiClient.emit('session.log.event', {
+              sessionId,
+              userId,
+              eventType: SessionEventType.SessionError,
+              severity: LogSeverity.Warning,
+              message: `[BrowserService] Помилка автологіну:`, error,
+              isIncident: false
+            });
+          } finally {
+            await loginPage.close();
+          }
         }
       } else {
         this.apiClient.emit('notification.send', {
@@ -309,16 +315,16 @@ export class BrowserService {
       typeName: NotificationEventType.SESSION_STARTED,
       content: {
         subject: `[BrowserService] Context успішно створено.`,
-        body: `[BrowserService] Context для ${sessionId} успішно створено.`,
+        body: `[BrowserService] Context для сесії з id: ${sessionId} успішно створено.`,
       },
       sendEmail: false,
     });
     this.apiClient.emit('session.log.event', {
       sessionId,
-      userId,
+      userId: userId,
       eventType: SessionEventType.Other,
       severity: LogSeverity.Info,
-      message: `[BrowserService] Context для ${sessionId} успішно створено.`,
+      message: `[BrowserService] Context для сесії з id: ${sessionId} успішно створено.`,
       isIncident: false
     });
     return context;
@@ -421,23 +427,30 @@ export class BrowserService {
     }, 1000 / 30);
 
     this.frameIntervals.set(clientKey, interval);
+    const strategy = this.authRegistry.get(session.config.url);
+    if (strategy && strategy.isInteractive && !session.interactiveLoginStarted) {
+      session.interactiveLoginStarted = true;
 
+      strategy.login(page, session.config.authData).catch(error => {
+        this.logger.error(`[BrowserService] Помилка інтерактивного логіну: ${error}`);
+      });
+    }
     this.apiClient.emit('notification.send', {
       userId: userId,
       typeName: NotificationEventType.SESSION_STARTED,
       content: {
         subject: `[BrowserService] Вкладку створено`,
-        body: `[BrowserService] Вкладку для користувача з id: ${userId} створено.`,
+        body: `[BrowserService] Вкладку для користувача ${userId} створено.`,
       },
       sendEmail: false,
     });
     this.apiClient.emit('session.log.event', {
       sessionId,
-      userId,
-      eventType: SessionEventType.ForbiddenAction,
-      severity: LogSeverity.Critical,
-      message: `[BrowserService] Вкладку для користувача з id: ${userId} створено.`,
-      isIncident: true
+      userId: userId,
+      eventType: SessionEventType.Other,
+      severity: LogSeverity.Warning,
+      message: `[BrowserService] Вкладку для користувача ${userId} створено.`,
+      isIncident: false
     });
     return page;
   }
@@ -458,7 +471,7 @@ export class BrowserService {
     }
   }
 
-  async interact(sessionId: string, clientId: string, action: any) {
+  async interact(sessionId: string, clientId: string, userId: string, action: any) {
     // Вкладка вже правильно шукається для конкретного клієнта
     const page = this.activePages.get(sessionId)?.get(clientId);
     if (!page) return;
@@ -466,9 +479,52 @@ export class BrowserService {
     try {
       switch (action.type) {
         case 'mousemove': await page.mouse.move(action.x, action.y); break;
-        case 'mousedown':
+        case 'mousedown': {
+          try {
+            // Отримуємо інформацію про елемент, по якому клікнули
+            const elementInfo = await page.evaluate(({ x, y }) => {
+              const el = document.elementFromPoint(x, y);
+              if (!el) return 'порожнє місце';
+
+              // Хак: часто користувачі клікають по <span> або <svg> всередині кнопки.
+              // Шукаємо найближчий "батьківський" клікабельний елемент (button або a), або залишаємо поточний
+              const target = el.closest('button, a, input, [role="button"]') || el;
+
+              const tag = target.tagName.toLowerCase();
+              const id = target.id ? `#${target.id}` : '';
+
+              // Збираємо текст, очищаємо від переносів рядків і обрізаємо до 50 символів
+              const text = (target.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 50);
+
+              if (text) {
+                return `<${tag}${id}> з текстом "${text}"`;
+              }
+
+              // Якщо тексту немає (наприклад, кнопка-іконка або інпут), беремо важливі атрибути
+              const name = target.getAttribute('name');
+              const type = target.getAttribute('type');
+              const attr = name ? `[name="${name}"]` : type ? `[type="${type}"]` : '';
+
+              return `<${tag}${id}${attr}> (без тексту)`;
+            }, { x: action.x, y: action.y });
+
+            this.apiClient.emit('session.log.event', {
+              sessionId,
+              userId: userId,
+              eventType: SessionEventType.ButtonClick,
+              severity: LogSeverity.Warning,
+              message: `[BrowserService] Користувач ${userId} натиснув на елемент ${elementInfo} .`,
+              isIncident: false
+            });
+          } catch (err) {
+          
+          }
+
+          // Виконуємо сам клік
           const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-          await page.mouse.down({ button: downBtn }); break;
+          await page.mouse.down({ button: downBtn });
+          break;
+        }
         case 'mouseup':
           const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
           await page.mouse.up({ button: upBtn }); break;

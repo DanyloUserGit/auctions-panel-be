@@ -1,16 +1,18 @@
 export enum SessionEventType {
-    ForbiddenAction,
-    Navigation,
-    SessionError,
-    TextInput,
-    ButtonClick,
-    Other
+    ForbiddenAction = 'ForbiddenAction',
+    Navigation = 'Navigation',
+    SessionError = 'SessionError',
+    TextInput = 'TextInput',
+    ButtonClick = 'ButtonClick',
+    Other = 'Other'
 }
+
 export enum LogSeverity {
-    Info,
-    Warning,
-    Critical
+    Info = 'Info',
+    Warning = 'Warning',
+    Critical = 'Critical'
 }
+
 export enum NotificationEventType {
   SESSION_STARTED = 'SESSION_STARTED',
   SESSION_EXPIRING = 'SESSION_EXPIRING',
