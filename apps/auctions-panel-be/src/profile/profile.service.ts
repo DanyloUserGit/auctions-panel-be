@@ -58,7 +58,7 @@ export class ProfileService {
         data: dataToUpdate,
       });
     } catch (error) {
-      if (error.code === 'P2002') {
+      if ((error as any).code === 'P2002') {
         throw new BadRequestException('Цей email вже використовується');
       }
       if (error instanceof ForbiddenException || error instanceof BadRequestException) {

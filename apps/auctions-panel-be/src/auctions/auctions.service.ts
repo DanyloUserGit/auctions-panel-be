@@ -46,7 +46,7 @@ export class AuctionsService {
     return auction;
   }
 
-  async findAll(groupId: string, user?: { id: string; role: Roles }) {
+  async findAll(groupId: string, user?: { id: string; role: Roles; auctionGroupId?: string | null }) {
     if (!user?.id) return [];
     const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
     if (isAdmin) {
@@ -61,12 +61,24 @@ export class AuctionsService {
       });
     }
 
-    return this.prismaService.auction.findMany({
-      where: {
+    const orConditions: any[] = [
+      {
         users: {
           some: { id: user.id },
         },
+      },
+    ];
+
+    if (user.auctionGroupId) {
+      orConditions.push({
+        auctionGroupId: user.auctionGroupId,
+      });
+    }
+
+    return this.prismaService.auction.findMany({
+      where: {
         auctionGroupId: groupId,
+        OR: orConditions,
       },
       include: {
         users: true,
@@ -77,7 +89,7 @@ export class AuctionsService {
     });
   }
 
-  async findOne(id: string, user?: { id: string; role: Roles }) {
+  async findOne(id: string, user?: { id: string; role: Roles; auctionGroupId?: string | null }) {
     if (!user?.id) {
       throw new ForbiddenException('Потрібна авторизація');
     }
@@ -100,12 +112,24 @@ export class AuctionsService {
       return auction;
     }
 
-    const auction = await this.prismaService.auction.findFirst({
-      where: {
-        id,
+    const orConditions: any[] = [
+      {
         users: {
           some: { id: user.id },
         },
+      },
+    ];
+
+    if (user.auctionGroupId) {
+      orConditions.push({
+        auctionGroupId: user.auctionGroupId,
+      });
+    }
+
+    const auction = await this.prismaService.auction.findFirst({
+      where: {
+        id,
+        OR: orConditions,
       },
       include: {
         users: true,
@@ -170,6 +194,14 @@ export class AuctionsService {
     }
   }
   async remove(id: string) {
+    await this.prismaService.session.deleteMany({
+      where: { auctionId: id },
+    });
+
+    await this.prismaService.auctionAuth.deleteMany({
+      where: { auctionId: id }
+    })
+
     return await this.prismaService.auction.delete({
       where: { id },
     });
@@ -220,7 +252,7 @@ export class AuctionsService {
   }
 
   async search(params: {
-    user?: { id: string; role: Roles };
+    user?: { id: string; role: Roles; auctionGroupId?: string | null };
     query?: string;
     auctionGroupId?: string;
   }) {
@@ -228,39 +260,54 @@ export class AuctionsService {
 
     const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
     console.log(user, query, auctionGroupId, isAdmin);
-    return this.prismaService.auction.findMany({
-      where: {
-        AND: [
-          query
-            ? {
-              OR: [
-                {
-                  title: {
-                    contains: query,
-                    mode: 'insensitive',
-                  },
-                },
-                {
-                  url: {
-                    contains: query,
-                    mode: 'insensitive',
-                  },
-                },
-              ],
-            }
-            : {},
 
-          auctionGroupId ? { auctionGroupId } : {},
+    const andConditions: any[] = [];
 
-          !isAdmin
-            ? {
-              users: {
-                some: { id: user?.id },
-              },
-            }
-            : {},
+    if (query) {
+      andConditions.push({
+        OR: [
+          {
+            title: {
+              contains: query,
+              mode: 'insensitive',
+            },
+          },
+          {
+            url: {
+              contains: query,
+              mode: 'insensitive',
+            },
+          },
         ],
-      },
+      });
+    }
+
+    if (auctionGroupId) {
+      andConditions.push({ auctionGroupId });
+    }
+
+    if (!isAdmin) {
+      const orConditions: any[] = [
+        {
+          users: {
+            some: { id: user?.id },
+          },
+        },
+      ];
+
+      if (user?.auctionGroupId) {
+        orConditions.push({
+          auctionGroupId: user.auctionGroupId,
+        });
+      }
+
+      andConditions.push({
+        OR: orConditions,
+      });
+    }
+
+    return this.prismaService.auction.findMany({
+      where: andConditions.length > 0 ? { AND: andConditions } : {},
       include: {
         auctionGroup: true,
       },

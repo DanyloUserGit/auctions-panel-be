@@ -12,19 +12,41 @@ import {
 import { Server, Socket } from 'socket.io';
 import { SessionsService } from './sessions.service';
 
+// Додаємо інтерфейс для збереження контексту відключення
+interface DisconnectData {
+  timeout: NodeJS.Timeout;
+  sessionId: string;
+  auctionId: string;
+  auctionAuthId: string;
+}
+
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org'],
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org', 'https://panel.caddyluck.com.ua'],
   },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 })
 export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
+
+  // Змінюємо тип мапи, щоб зберігати деталі сесії
+  private disconnectTimeouts = new Map<string, DisconnectData>();
 
   constructor(
     private readonly sessionService: SessionsService,
     @Inject('WORKER_SERVICE') private rabbitClient: ClientProxy
   ) { }
+
+  private async executeLeaveLogic(sessionId: string, clientId: string) {
+    await this.sessionService.leaveSession(sessionId);
+    this.rabbitClient
+      .emit('webrtc_client_disconnect', { sessionId, clientId })
+      .subscribe({
+        error: (err) => console.error('Помилка відправки webrtc_client_disconnect:', err)
+      });
+  }
 
   handleConnection(client: Socket) {
     console.log(`Клієнт підключився: ${client.id}`);
@@ -32,12 +54,29 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
   handleDisconnect(client: Socket) {
     console.log(`Клієнт відключився: ${client.id}`);
-    if (client.data.sessionId) {
-      this.handleLeaveAuction(client);
+
+    // Беремо всі сесії, до яких підключений цей сокет
+    const sessions = client.data.sessions as Map<string, { auctionId: string; auctionAuthId: string }> | undefined;
+
+    if (sessions && sessions.size > 0) {
+      sessions.forEach((data, sessionId) => {
+        const timeout = setTimeout(() => {
+          console.log(`⏳ Час вийшов. Остаточно видаляємо клієнта з сесії ${sessionId}`);
+          this.executeLeaveLogic(sessionId, client.id).catch(console.error);
+          this.disconnectTimeouts.delete(sessionId);
+        }, 10000);
+
+        // Додаємо кожну сесію в мапу очікування
+        this.disconnectTimeouts.set(sessionId, {
+          timeout,
+          sessionId,
+          auctionId: data.auctionId,
+          auctionAuthId: data.auctionAuthId
+        });
+      });
     }
   }
 
-  // 1. Клієнт просить підключитися до аукціону
   @SubscribeMessage('join_auction')
   async handleJoinAuction(
     @ConnectedSocket() client: Socket,
@@ -52,8 +91,33 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     }
   ) {
     try {
-      // Валідація і створення сесії через наш сервіс
+      if (data.sessionId && client.rooms.has(data.sessionId)) {
+        console.log(`Клієнт вже знаходиться в кімнаті сесії ${data.sessionId}, пропускаємо інкремент`);
+        client.emit('session_ready', { sessionId: data.sessionId });
+        return;
+      }
+      let isReconect = false;
+
+      // Перевіряємо, чи є юзер в мапі на відключення
+      if (data.sessionId && this.disconnectTimeouts.has(data.sessionId)) {
+        const storedData = this.disconnectTimeouts.get(data.sessionId)!;
+
+        if (storedData.auctionId === data.auctionId && storedData.auctionAuthId === data.auctionAuthId) {
+          clearTimeout(storedData.timeout);
+          this.disconnectTimeouts.delete(data.sessionId);
+          console.log(`Скасовано відключення для сесії ${data.sessionId} (реконект)`);
+          isReconect = true;
+        } else {
+          console.log(`Примусово закриваємо стару сесію.`);
+          clearTimeout(storedData.timeout);
+          this.disconnectTimeouts.delete(data.sessionId);
+          this.executeLeaveLogic(storedData.sessionId, client.id).catch(console.error);
+          isReconect = false;
+        }
+      }
+
       const session = await this.sessionService.initializeSession(
+        isReconect,
         data.userId,
         data.auctionId,
         data.auctionAuthId,
@@ -62,38 +126,48 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
         data.sessionId
       );
 
-      client.data.sessionId = session.id;
+      if (!client.data.sessions) {
+        client.data.sessions = new Map<string, { auctionId: string; auctionAuthId: string }>();
+      }
+      // Додаємо нову сесію в мапу сокета, не затираючи попередні!
+      client.data.sessions.set(session.id, {
+        auctionId: data.auctionId,
+        auctionAuthId: data.auctionAuthId
+      });
 
       client.join(session.id);
       client.emit('session_ready', { sessionId: session.id });
     } catch (error) {
-      console.error('❌ Помилка в Gateway (join_auction):', error.message); // ДОДАЙ ЦЕ
-      client.emit('error', { message: error.message });
+      console.error('❌ Помилка в Gateway (join_auction):', error);
+      client.emit('error', { message: error });
     }
   }
 
   @SubscribeMessage('leave_auction')
-  async handleLeaveAuction(@ConnectedSocket() client: Socket) {
-    const sessionId = client.data.sessionId;
+  async handleLeaveAuction(@ConnectedSocket() client: Socket, @MessageBody() payload: { sessionId: string }) {
+    const sessionId = payload?.sessionId;
     if (sessionId) {
       client.leave(sessionId);
-      await this.sessionService.leaveSession(sessionId); // Зменшуємо лічильник
+      await this.sessionService.leaveSession(sessionId);
+
       this.rabbitClient
         .emit('webrtc_client_disconnect', { sessionId, clientId: client.id })
         .subscribe({
           error: (err) => console.error('Помилка відправки webrtc_client_disconnect:', err)
         });
-      delete client.data.sessionId;
+
+      // Очищаємо дані ТІЛЬКИ для цієї конкретної сесії, залишаючи інші активними
+      if (client.data.sessions) {
+        client.data.sessions.delete(sessionId);
+      }
     }
   }
 
-  // 2. Пересилка WebRTC Signaling даних від React до Worker-а
   @SubscribeMessage('webrtc_signal')
   handleWebRtcSignal(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { userId:string, sessionId: string; signalData: any; width: number; height: number }
+    @MessageBody() payload: { userId: string, sessionId: string; signalData: any; width: number; height: number }
   ) {
-    // ДОДАНО .subscribe() !!!
     this.rabbitClient
       .emit('webrtc_signal_to_worker', {
         userId: payload.userId,

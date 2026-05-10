@@ -33,7 +33,7 @@ export class SessionsService implements OnModuleInit {
   }
   async getSessions(auctionAuthId: string) {
     return this.prisma.session.findMany({
-      where: { auctionAuthId },
+      where: { auctionAuthId, isActive: true },
       orderBy: {
         isActive: 'desc',
       },
@@ -141,7 +141,7 @@ export class SessionsService implements OnModuleInit {
     if (user) {
       this.notificationService.notify(adminId, "SESSION_ENDED", {
         subject: "Сесія примусово завершена",
-        body: `Користувач ${user.firstName} ${user.lastName} примусово закінчив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
+        body: `Користувач ${user.firstName} ${user.lastName} примусово закінчив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.title}.`
       }, false)
     }
 
@@ -163,6 +163,7 @@ export class SessionsService implements OnModuleInit {
   }
 
   async initializeSession(
+    isReconnect: boolean,
     userId: string,
     auctionId: string,
     auctionAuthId: string,
@@ -194,10 +195,17 @@ export class SessionsService implements OnModuleInit {
     let session: Session | null = null;
     if (sessionId) {
       session = await this.prisma.session.findUnique({ where: { id: sessionId } });
+      const existingTimeout = this.pendingClosures.get(sessionId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        this.pendingClosures.delete(sessionId);
+        console.log(`[SessionsService] Таймер закриття сесії ${sessionId} скасовано (користувач повернувся)`);
+      }
     }
     if (!session) {
       session = await this.prisma.session.findFirst({
-        where: { auctionId, isActive: true },
+        // ВИПРАВЛЕНО: Додано auctionAuthId, щоб не мішати різні акаунти в одну сесію!
+        where: { auctionId, auctionAuthId, isActive: true },
       });
     }
 
@@ -220,7 +228,7 @@ export class SessionsService implements OnModuleInit {
       session = await this.prisma.session.update({
         where: { id: session.id },
         data: {
-          activeConnections: { increment: 1 },
+          activeConnections: { increment: isReconnect ? 0 : 1 },
           isActive: true
         },
       });
@@ -250,7 +258,7 @@ export class SessionsService implements OnModuleInit {
       if (user) {
         this.notificationService.notify(userId, "SESSION_STARTED", {
           subject: "Новий вхід до системи",
-          body: `Користувач ${user.firstName} ${user.lastName} запустив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
+          body: `Користувач ${user.firstName} ${user.lastName} запустив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.title}.`
         }, false)
       }
       this.startBrowserWorker(
@@ -262,7 +270,7 @@ export class SessionsService implements OnModuleInit {
     return session;
   }
 
-  private startBrowserWorker(userId:string, sessionId: string,
+  private startBrowserWorker(userId: string, sessionId: string,
     auctionUrl: string,
     width: number,
     height: number,
@@ -339,7 +347,7 @@ export class SessionsService implements OnModuleInit {
           } catch (e) {
             console.error('Помилка під час відкладеного закриття сесії:', e);
           }
-        }, 5000);
+        }, 60000);
 
         this.pendingClosures.set(sessionId, timeout);
       }

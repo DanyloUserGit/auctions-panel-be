@@ -27,6 +27,7 @@ export class BrowserService {
   constructor(private readonly authRegistry: AuthStrategyRegistry, @Inject('API_CLIENT') private apiClient: ClientProxy) { }
 
   private readonly logger = new Logger(BrowserService.name);
+  private actionQueues = new Map<string, Promise<void>>();
 
   // Зберігаємо вкладки для КОЖНОГО клієнта: Map<sessionId, Map<clientId, Page>>
   private activePages = new Map<string, Map<string, Page>>();
@@ -273,7 +274,7 @@ export class BrowserService {
               typeName: NotificationEventType.WORKER_ERROR,
               content: {
                 subject: `[BrowserService] Помилка автологіну`,
-                body: `[BrowserService] Помилка автологіну:`, error,
+                body: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
               },
               sendEmail: false,
             });
@@ -282,7 +283,7 @@ export class BrowserService {
               userId,
               eventType: SessionEventType.SessionError,
               severity: LogSeverity.Warning,
-              message: `[BrowserService] Помилка автологіну:`, error,
+              message: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
               isIncident: false
             });
           } finally {
@@ -341,6 +342,159 @@ export class BrowserService {
 
     const page = await session.context.newPage();
 
+    await page.exposeFunction('logActionToNode', (actionType: string, details: string, currentUrl: string) => {
+      const fullMessage = `[Browser Action] ${actionType} на сторінці [${currentUrl}]: ${details}`;
+
+      this.apiClient.emit('session.log.event', {
+        sessionId,
+        userId,
+        eventType: SessionEventType.Other,
+        severity: LogSeverity.Info,
+        message: fullMessage,
+        isIncident: false
+      });
+      this.logger.debug(`[User Action] ${actionType} (${currentUrl}) -> ${details}`);
+    });
+
+    // 👇 2. Впроваджуємо вдосконалений скрипт аналізу елементів
+    await page.addInitScript(() => {
+      // Універсальна функція для отримання зрозумілого опису будь-якого елемента
+      const getElementDescription = (el: HTMLElement): string => {
+        if (!el) return 'невідомий об\'єкт';
+
+        const tagName = el.tagName.toLowerCase();
+
+        // 1. Перевіряємо явні атрибути доступності (найвищий пріоритет)
+        const ariaLabel = el.getAttribute('aria-label');
+        if (ariaLabel) return `<${tagName}> [aria-label="${ariaLabel}"]`;
+
+        const title = el.getAttribute('title');
+        if (title) return `<${tagName}> [title="${title}"]`;
+
+        // 2. Перевіряємо ідентифікатори форми
+        const id = el.id;
+        if (id) return `<${tagName}> [id="${id}"]`;
+
+        const name = el.getAttribute('name');
+        if (name) return `<${tagName}> [name="${name}"]`;
+
+        const placeholder = el.getAttribute('placeholder');
+        if (placeholder) return `<${tagName}> [placeholder="${placeholder}"]`;
+
+        // 3. Перевіряємо текст (використовуємо innerText, щоб ігнорувати прихований текст, або textContent)
+        const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text.length > 0) {
+          return `<${tagName}> з текстом "${text.substring(0, 60)}"`;
+        }
+
+        // 4. Якщо це кнопка-іконка (без тексту), шукаємо картинку або SVG всередині
+        const img = el.querySelector('img');
+        if (img && img.getAttribute('alt')) {
+          return `<${tagName}> із зображенням [alt="${img.getAttribute('alt')}"]`;
+        }
+
+        const svg = el.querySelector('svg');
+        if (svg) {
+          const svgClass = svg.getAttribute('class') || '';
+          const dataIcon = svg.getAttribute('data-icon') || svgClass.split(/\s+/)[0];
+          if (dataIcon) return `<${tagName}> з іконкою [${dataIcon}]`;
+        }
+
+        // 5. ФОЛБЕК: Якщо немає ні тексту, ні ID, будуємо читабельний CSS-контекст
+        // Безпечно отримуємо класи (оскільки у SVG className - це об'єкт, використовуємо getAttribute)
+        const className = (el.getAttribute('class') || '').trim().split(/\s+/).slice(0, 2).join('.');
+        const classStr = className ? `.${className}` : '';
+
+        // Додаємо інформацію про батьківський елемент, щоб зрозуміти, в якому блоці клікнули
+        const parent = el.parentElement;
+        if (parent) {
+          const parentTag = parent.tagName.toLowerCase();
+          const parentId = parent.id ? `#${parent.id}` : '';
+          const parentClass = (parent.getAttribute('class') || '').trim().split(/\s+/)[0];
+          const parentClassStr = parentClass ? `.${parentClass}` : '';
+
+          return `елемент <${tagName}${classStr}> (без тексту) всередині блоку <${parentTag}${parentId}${parentClassStr}>`;
+        }
+
+        return `<${tagName}${classStr}> (без ідентифікаторів)`;
+      };
+
+      // Логування кліків
+      document.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (!target) return;
+
+        // Шукаємо найближчий інтерактивний елемент
+        const interactiveEl = target.closest('button, a, input, select, textarea, [role="button"], [tabindex]') || target;
+
+        const description = getElementDescription(interactiveEl as HTMLElement);
+        const currentUrl = window.location.href;
+
+        // Відправляємо детальний лог разом з URL
+        (window as any).logActionToNode('Клік', description, currentUrl);
+      }, true);
+
+      // Логування вводу тексту
+      document.addEventListener('change', (e) => {
+        const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        if (!target) return;
+
+        const tagName = target.tagName.toLowerCase();
+        if (['input', 'textarea', 'select'].includes(tagName)) {
+          const isPassword = target.type === 'password';
+          const value = isPassword ? '********' : target.value;
+
+          const description = getElementDescription(target);
+          const currentUrl = window.location.href;
+
+          (window as any).logActionToNode(
+            'Ввід даних',
+            `Поле ${description} змінило значення на: "${value}"`,
+            currentUrl
+          );
+        }
+      }, true);
+    });
+    await page.addInitScript(() => {
+      // Логування кліків
+      document.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (!target) return;
+
+        // Шукаємо найближчий інтерактивний елемент (щоб не логувати кліки по порожніх div)
+        const interactiveEl = target.closest('button, a, input, select, textarea, [role="button"], [tabindex]') || target;
+
+        // Спроба отримати зрозумілу назву елемента
+        let name = interactiveEl.textContent || (interactiveEl as HTMLInputElement).value || interactiveEl.getAttribute('aria-label') || interactiveEl.id || interactiveEl.className || '';
+        name = name.replace(/\s+/g, ' ').trim().substring(0, 50); // Обрізаємо довгий текст
+
+        const tagName = interactiveEl.tagName.toLowerCase();
+
+        // Логуємо тільки якщо клік був по чомусь осмисленому
+        if (name) {
+          (window as any).logActionToNode('Клік', `Елемент <${tagName}> з текстом/id "${name}"`);
+        } else {
+          (window as any).logActionToNode('Клік', `Невідомий елемент <${tagName}>`);
+        }
+      }, true); // true - фаза capture (перехоплюємо раніше за сам сайт)
+
+      // Логування вводу тексту (спрацьовує при втраті фокусу або натисканні Enter)
+      document.addEventListener('change', (e) => {
+        const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        if (!target) return;
+
+        const tagName = target.tagName.toLowerCase();
+        if (['input', 'textarea', 'select'].includes(tagName)) {
+          // ВАЖЛИВО: Маскуємо паролі!
+          const isPassword = target.type === 'password';
+          const value = isPassword ? '********' : target.value;
+          this.logger.debug(target)
+          const identifier = target.name || target.id || target.getAttribute('aria-label') || target.getAttribute('placeholder') || 'невідоме поле';
+
+          (window as any).logActionToNode('Ввід даних', `Поле "${identifier}" змінило значення на: "${value}"`);
+        }
+      }, true);
+    });
     if (!this.activePages.has(sessionId)) {
       this.activePages.set(sessionId, new Map());
     }
@@ -368,6 +522,15 @@ export class BrowserService {
       page.on('framenavigated', async (frame) => {
         if (frame === page.mainFrame()) {
           const currentUrl = frame.url();
+
+          this.apiClient.emit('session.log.event', {
+            sessionId,
+            userId,
+            eventType: SessionEventType.Other,
+            severity: LogSeverity.Info,
+            message: `[Browser] Перехід на сторінку: ${currentUrl}`,
+            isIncident: false
+          });
           const currentNorm = normalizeUrlNode(currentUrl);
 
           const isForbidden = normalizedForbiddenRoutes.some(fr => currentNorm.includes(fr));
@@ -407,7 +570,7 @@ export class BrowserService {
     const cdpSession = await page.context().newCDPSession(page);
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: 80,
+      quality: 90,
       maxWidth: session.config.viewport.width,
       maxHeight: session.config.viewport.height,
     });
@@ -415,17 +578,19 @@ export class BrowserService {
     let lastFrameBuffer: Buffer | null = null;
     const clientKey = `${sessionId}_${clientId}`;
 
-    cdpSession.on('Page.screencastFrame', async (frameObject) => {
-      await cdpSession.send('Page.screencastFrameAck', { sessionId: frameObject.sessionId }).catch(() => { });
+    // НЕ робимо колбек async, щоб не блокувати потік
+    cdpSession.on('Page.screencastFrame', (frameObject) => {
+      // Відправляємо Ack у фоні (catch обов'язковий, бо сесія може вже закритися)
+      cdpSession.send('Page.screencastFrameAck', { sessionId: frameObject.sessionId }).catch(() => { });
       lastFrameBuffer = Buffer.from(frameObject.data, 'base64');
     });
 
+    const TARGET_FPS = 24;
     const interval = setInterval(() => {
       if (lastFrameBuffer) {
         onFrame(lastFrameBuffer);
       }
-    }, 1000 / 30);
-
+    }, 1000 / TARGET_FPS);
     this.frameIntervals.set(clientKey, interval);
     const strategy = this.authRegistry.get(session.config.url);
     if (strategy && strategy.isInteractive && !session.interactiveLoginStarted) {
@@ -472,68 +637,87 @@ export class BrowserService {
   }
 
   async interact(sessionId: string, clientId: string, userId: string, action: any) {
-    // Вкладка вже правильно шукається для конкретного клієнта
     const page = this.activePages.get(sessionId)?.get(clientId);
     if (!page) return;
 
-    try {
-      switch (action.type) {
-        case 'mousemove': await page.mouse.move(action.x, action.y); break;
-        case 'mousedown': {
-          try {
-            // Отримуємо інформацію про елемент, по якому клікнули
-            const elementInfo = await page.evaluate(({ x, y }) => {
-              const el = document.elementFromPoint(x, y);
-              if (!el) return 'порожнє місце';
+    const clientKey = `${sessionId}_${clientId}`;
 
-              // Хак: часто користувачі клікають по <span> або <svg> всередині кнопки.
-              // Шукаємо найближчий "батьківський" клікабельний елемент (button або a), або залишаємо поточний
-              const target = el.closest('button, a, input, [role="button"]') || el;
-
-              const tag = target.tagName.toLowerCase();
-              const id = target.id ? `#${target.id}` : '';
-
-              // Збираємо текст, очищаємо від переносів рядків і обрізаємо до 50 символів
-              const text = (target.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 50);
-
-              if (text) {
-                return `<${tag}${id}> з текстом "${text}"`;
-              }
-
-              // Якщо тексту немає (наприклад, кнопка-іконка або інпут), беремо важливі атрибути
-              const name = target.getAttribute('name');
-              const type = target.getAttribute('type');
-              const attr = name ? `[name="${name}"]` : type ? `[type="${type}"]` : '';
-
-              return `<${tag}${id}${attr}> (без тексту)`;
-            }, { x: action.x, y: action.y });
-
-            this.apiClient.emit('session.log.event', {
-              sessionId,
-              userId: userId,
-              eventType: SessionEventType.ButtonClick,
-              severity: LogSeverity.Warning,
-              message: `[BrowserService] Користувач ${userId} натиснув на елемент ${elementInfo} .`,
-              isIncident: false
-            });
-          } catch (err) {
-          
-          }
-
-          // Виконуємо сам клік
-          const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-          await page.mouse.down({ button: downBtn });
-          break;
+    // 1. ДІЇ, ЩО НЕ ПОТРЕБУЮТЬ ЧЕРГИ (Рух та скрол виконуються миттєво)
+    if (action.type === 'mousemove' || action.type === 'wheel') {
+      try {
+        if (action.type === 'mousemove') {
+          // ПРИБРАНО { steps: 2 }, бо це дуже уповільнювало Playwright!
+          await page.mouse.move(action.x, action.y);
+        } else if (action.type === 'wheel') {
+          await page.mouse.wheel(action.deltaX, action.deltaY);
         }
-        case 'mouseup':
-          const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-          await page.mouse.up({ button: upBtn }); break;
-        case 'wheel': await page.mouse.wheel(action.deltaX, action.deltaY); break;
-        case 'keydown': await page.keyboard.down(action.key); break;
-        case 'keyup': await page.keyboard.up(action.key); break;
+      } catch (e) {
+        this.logger.debug(`[Browser] Помилка миттєвої дії: ${(e as Error).message}`);
       }
-    } catch (e) {
-      this.logger.debug(`[Browser] Помилка дії: ${(e as Error).message}`);
+      return; // Виходимо, щоб ці дії не блокували чергу
     }
+
+    // 2. ДІЇ, ЯКІ ПОТРЕБУЮТЬ СТРОГОЇ ЧЕРГИ (Кліки та клавіатура)
+    const previousAction = this.actionQueues.get(clientKey) || Promise.resolve();
+
+    const currentAction = previousAction.then(async () => {
+      try {
+        switch (action.type) {
+          case 'mousedown': {
+            const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
+
+            // ГАРАНТІЯ ТОЧНОСТІ: Примусово ставимо мишку туди, де був клік на фронті
+            if (action.x !== undefined && action.y !== undefined) {
+              await page.mouse.move(action.x, action.y);
+            }
+            await page.mouse.down({ button: downBtn });
+
+            // Асинхронне логування
+            // page.evaluate(({ x, y }) => {
+            //   const el = document.elementFromPoint(x, y);
+            //   if (!el) return 'порожнє місце';
+            //   const target = el.closest('button, a, input, [role="button"]') || el;
+            //   const text = (target.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 50);
+            //   return text ? `<${target.tagName.toLowerCase()}> з текстом "${text}"` : 'елемент';
+            // }, { x: action.x, y: action.y })
+            //   .then((elementInfo) => {
+            //     this.apiClient.emit('session.log.event', {
+            //       sessionId,
+            //       userId,
+            //       eventType: SessionEventType.Other,
+            //       severity: LogSeverity.Warning,
+            //       message: `[Browser] Користувач ${userId} натиснув на елемент ${elementInfo}`,
+            //       isIncident: true
+            //     });
+            //   }).catch(() => { });
+            break;
+          }
+          case 'mouseup': {
+            const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
+
+            if (action.x !== undefined && action.y !== undefined) {
+              await page.mouse.move(action.x, action.y);
+            }
+            await page.mouse.up({ button: upBtn });
+            break;
+          }
+          case 'keydown':
+            await page.keyboard.down(action.key);
+            break;
+          case 'keyup':
+            await page.keyboard.up(action.key);
+            break;
+        }
+      } catch (e) {
+        this.logger.debug(`[Browser] Помилка черги: ${(e as Error).message}`);
+      }
+    });
+
+    this.actionQueues.set(clientKey, currentAction);
+    currentAction.finally(() => {
+      if (this.actionQueues.get(clientKey) === currentAction) {
+        this.actionQueues.delete(clientKey);
+      }
+    });
   }
 }

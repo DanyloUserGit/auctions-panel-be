@@ -20,25 +20,31 @@ export class CarmarketAyvensAuthStrategy implements IAuthStrategy {
             this.logger.debug('Банер з куками не знайдено або вже прийнято.');
         }
 
+        try {
+            const popupCloseSelector = '.ab_widget_container_popin-image_close_button';
+            await page.waitForSelector(popupCloseSelector, { state: 'visible', timeout: 5000 });
+            await page.click(popupCloseSelector);
+            this.logger.debug('Віджет/попап успішно закрито.');
+        } catch (e) {
+            this.logger.debug('Віджет/попап не знайдено або не з\'явився.');
+        }
+
+        await page.waitForSelector("#btn_signIn", { state: 'visible', timeout: 5000 });
+        this.logger.debug('Знаходимо кнопку входу та клікаємо її.');
         await page.click("#btn_signIn");
 
-        await page.waitForSelector('#userName', { state: 'visible', timeout: 5000 });
-
+        await page.waitForSelector('#userName', { state: 'visible', timeout: 15000 });
         await page.fill('#userName', authData.email);
+        this.logger.debug('Заповнюємо поле email.');
+
+
         await page.fill('#password', authData.password);
+        this.logger.debug('Заповнюємо поле пароля.');
 
-        await Promise.all([
-            page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => { }),
-            page.click('button[type="submit"]')
-        ]);
+        await page.click('button[type="submit"]');
+        this.logger.debug('Натискаємо кнопку входу.');
 
-        const closeBtnSelector = '.ayvens-icon.ayvens-icon-close';
-        try {
-            await page.waitForSelector(closeBtnSelector, { state: 'visible', timeout: 10000 });
-            await page.click(closeBtnSelector);
-        } catch (error) {
-            this.logger.warn('Іконку закриття не знайдено, можливо вікно не з\'явилось. Продовжуємо...');
-        }
+        await page.waitForSelector('#userName', { state: 'hidden', timeout: 15000 });
 
         this.logger.log('Успішний логін!');
     }

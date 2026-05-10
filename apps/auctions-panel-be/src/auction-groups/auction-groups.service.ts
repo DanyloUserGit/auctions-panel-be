@@ -41,7 +41,7 @@ export class AuctionGroupsService {
       delete createAuctionGroupDto.sessionLimit;
       delete createAuctionGroupDto.canGaManageAccounts;
     }
-    
+
     return await this.prisma.auctionGroup.create({
       data: {
         ...rest,
@@ -99,25 +99,35 @@ export class AuctionGroupsService {
       return this.withCounts(groups);
     }
 
+    const userFull = await this.prisma.user.findFirst({
+      where: { id: user.id },
+      select: { auctionGroupId: true } 
+    });
+
     const groups = await this.prisma.auctionGroup.findMany({
       where: {
-        auctions: {
-          some: {
-            users: {
+        OR: [
+          // Умова 1: Користувач прив'язаний до аукціону в цій групі
+          {
+            auctions: {
               some: {
-                id: user.id,
+                users: {
+                  some: { id: user.id },
+                },
               },
             },
           },
-        },
+          // Умова 2: Користувач є учасником самої групи
+          {
+            id: userFull?.auctionGroupId || undefined, // undefined краще за "", Prisma просто проігнорує цю умову, якщо id немає
+          }
+        ],
       },
       include: {
         auctions: {
           where: {
             users: {
-              some: {
-                id: user.id,
-              },
+              some: { id: user.id },
             },
           },
         },
@@ -125,6 +135,8 @@ export class AuctionGroupsService {
         _count: { select: { users: true, auctions: true } },
       },
     });
+
+    return this.withCounts(groups);
     return this.withCounts(groups);
   }
 

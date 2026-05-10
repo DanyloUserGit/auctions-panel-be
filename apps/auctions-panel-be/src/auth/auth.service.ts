@@ -32,7 +32,7 @@ export class AuthService {
         response: token,
       },
     );
-
+    console.log(response.data);
     if (!response.data.success) {
       throw new ForbiddenException('Капча не пройдена або застаріла');
     }
@@ -58,7 +58,7 @@ export class AuthService {
       throw new NotFoundException('Користувача не знайдено');
     }
 
-    if(existing.isBlocked){
+    if (existing.isBlocked) {
       throw new ForbiddenException('Користувача заблоковано');
     }
 

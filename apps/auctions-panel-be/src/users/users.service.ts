@@ -53,6 +53,7 @@ export class UsersService {
       where: { id },
       include: {
         auctionGroup: true,
+        managedGroup: true,
         session: {
           include: { auction: true },
         },
@@ -79,7 +80,8 @@ export class UsersService {
         phone: user.phone,
         city: user.city,
         role: user.role,
-        group: user.auctionGroup?.title || 'Без групи',
+        auctionGroup: user.auctionGroup || null,
+        managedGroup: user.managedGroup || null,
       },
       status: {
         isActive: user.isActive,
@@ -132,7 +134,9 @@ export class UsersService {
         role: true,
         rights: true,
         phone: true,
+        city: true,
         auctionGroupId: true,
+        auctionGroup: true,
         managedGroup: true
       },
     });
