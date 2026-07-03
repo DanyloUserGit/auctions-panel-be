@@ -7,11 +7,11 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+import { Public } from '../decorators/public.decorator';
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
 import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
-import { Public } from '../decorators/public.decorator';
 
 @ApiTags('users')
 @Controller('users')
@@ -55,8 +55,11 @@ export class UsersController {
   }
 
   @Get()
-  findAll() {
-    return this.usersService.findAll();
+  findAll(
+    @Req() req
+  ) {
+    const user = req.user;
+    return this.usersService.findAll(user);
   }
 
   @Get(':id')

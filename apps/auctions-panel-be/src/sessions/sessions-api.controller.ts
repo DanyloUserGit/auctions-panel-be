@@ -4,7 +4,12 @@ import { SessionsService } from './sessions.service';
 
 @Controller('sessions')
 export class SessionsApiController {
-  constructor(private readonly sessionsService: SessionsService) {}
+  constructor(private readonly sessionsService: SessionsService) { }
+
+  @Get('active/mine')
+  getMyActiveSessions(@Req() req) {
+    return this.sessionsService.getActiveSessionsForUser(req.user.id);
+  }
 
   @Get(':auctionAuthId')
   @ApiQuery({ name: 'auctionAuthId', required: false, type: String })

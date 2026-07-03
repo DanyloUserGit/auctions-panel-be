@@ -12,6 +12,11 @@ enum Roles {
   User
 }
 
+enum NotificationConfigType {
+  Configurable
+  System
+}
+
 enum Rights {
   Read
   Write
@@ -127,22 +132,25 @@ model NotificationType {
   name        String  @unique
   description String?
 
-  userSettings UserNotificationSetting[]
+  roles Roles[]
 
+  configType NotificationConfigType @default(Configurable)
+
+  setting Json?
+
+  userSettings      UserNotificationSetting[]
   groupRequirements GroupNotificationRequirement[]
-
-  @@map("notification_types")
 }
 
 model UserNotificationSetting {
-  id                 String           @id @default(uuid()) @db.Uuid()
-  userId             String           @db.Uuid()
-  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  notificationTypeId String           @db.Uuid()
-  notificationType   NotificationType @relation(fields: [notificationTypeId], references: [id])
-
-  isEnabled Boolean               @default(true)
-  channels  NotificationChannel[] @default([InApp])
+  id                 String                @id @default(uuid()) @db.Uuid()
+  userId             String                @db.Uuid()
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationTypeId String                @db.Uuid()
+  notificationType   NotificationType      @relation(fields: [notificationTypeId], references: [id])
+  value              Int
+  isEnabled          Boolean               @default(true)
+  channels           NotificationChannel[] @default([InApp])
 
   @@unique([userId, notificationTypeId])
   @@map("user_notification_settings")

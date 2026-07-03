@@ -527,7 +527,7 @@ export class BrowserService {
             sessionId,
             userId,
             eventType: SessionEventType.Other,
-            severity: LogSeverity.Info,
+            severity: LogSeverity.Info, 
             message: `[Browser] Перехід на сторінку: ${currentUrl}`,
             isIncident: false
           });

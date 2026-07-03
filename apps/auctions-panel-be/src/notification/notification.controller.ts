@@ -6,7 +6,7 @@ import { NotificationService } from './notification.service';
 
 class UpdateSettingsDto {
     @ApiProperty({ description: 'ID типу сповіщення', example: '123e4567-e89b-12d3-a456-426614174000' })
-    typeId: string;
+    typeId!: string;
 
     @ApiProperty({ description: 'Чи увімкнено сповіщення', required: false, example: true })
     isEnabled?: boolean;
@@ -17,10 +17,10 @@ class UpdateSettingsDto {
 
 class SetGroupRequirementDto {
     @ApiProperty({ description: 'ID типу сповіщення', example: '123e4567-e89b-12d3-a456-426614174000' })
-    typeId: string;
+    typeId!: string;
 
     @ApiProperty({ description: 'Чи є сповіщення обов\'язковим', example: true })
-    isMandatory: boolean;
+    isMandatory!: boolean;
 }
 
 @Controller('notifications')

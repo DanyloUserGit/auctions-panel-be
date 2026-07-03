@@ -1,9 +1,9 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { Roles } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SessionLoggerService } from '../session-logger/session-logger.service'; // Ваш сервіс логів
 import { SessionFilterDto } from './dto/session-filter.dto';
-import { SessionEventType, Roles } from '@prisma/client';
-import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class SessionDispatcherService {
@@ -34,31 +34,22 @@ export class SessionDispatcherService {
 
     }
 
-    // ==========================================
-    // ОДЕРЖАННЯ СЕСІЙ (17.1 Активні / 17.2 Завершені)
-    // ==========================================
-
     async getSessions(filters: SessionFilterDto, userRole: Roles, userGroupId?: string) {
         const where: any = {};
 
-        // 1. Розділення на Активні (17.1) та Завершені (17.2)
         if (filters.isActive !== undefined) {
             where.isActive = filters.isActive;
         }
 
-        // 2. Обмеження прав доступу (Role-Based Access Control)
         if (userRole !== Roles.SuperAdmin) {
-            // Якщо це Admin (Admin), він бачить ТІЛЬКИ сесії своєї групи
             if (!userGroupId) {
                 throw new ForbiddenException('Користувач не прив\'язаний до жодної групи');
             }
             where.auctionGroupId = userGroupId;
         } else if (filters.auctionGroupId) {
-            // SuperAdmin може добровільно фільтрувати по групі
             where.auctionGroupId = filters.auctionGroupId;
         }
 
-        // 3. Застосування інших фільтрів з UI
         if (filters.userId) {
             where.users = { some: { id: filters.userId } };
         }
@@ -79,7 +70,7 @@ export class SessionDispatcherService {
             include: {
                 auction: { select: { id: true, title: true } },
                 users: { select: { id: true, email: true, firstName: true, lastName: true } },
-                endedBy: { select: { id: true, email: true } }, 
+                endedBy: { select: { id: true, email: true } },
             },
         });
     }

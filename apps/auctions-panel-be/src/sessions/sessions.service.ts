@@ -6,11 +6,11 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { Roles, Session, SessionEventType, SessionRights } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { decryptData } from '../utils/encrypt';
-import { SessionLoggerService } from '../session-logger/session-logger.service';
+import { Roles, Session, SessionEventType } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { SessionLoggerService } from '../session-logger/session-logger.service';
+import { decryptData } from '../utils/encrypt';
 
 @Injectable()
 export class SessionsService implements OnModuleInit {
@@ -161,7 +161,19 @@ export class SessionsService implements OnModuleInit {
 
     return updatedSession;
   }
-
+  async getActiveSessionsForUser(userId: string) {
+    return this.prisma.session.findMany({
+      where: {
+        isActive: true,
+        users: { some: { id: userId } },
+      },
+      select: {
+        id: true,
+        auctionId: true,
+        auctionAuthId: true,
+      },
+    });
+  }
   async initializeSession(
     isReconnect: boolean,
     userId: string,
@@ -229,7 +241,8 @@ export class SessionsService implements OnModuleInit {
         where: { id: session.id },
         data: {
           activeConnections: { increment: isReconnect ? 0 : 1 },
-          isActive: true
+          isActive: true,
+          users: { connect: { id: userId } },
         },
       });
 
