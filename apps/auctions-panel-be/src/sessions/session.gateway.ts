@@ -54,27 +54,33 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
   handleDisconnect(client: Socket) {
     console.log(`Клієнт відключився: ${client.id}`);
-
-    // Беремо всі сесії, до яких підключений цей сокет
     const sessions = client.data.sessions as Map<string, { auctionId: string; auctionAuthId: string }> | undefined;
+    if (!sessions || sessions.size === 0) return;
 
-    if (sessions && sessions.size > 0) {
-      sessions.forEach((data, sessionId) => {
-        const timeout = setTimeout(() => {
-          console.log(`⏳ Час вийшов. Остаточно видаляємо клієнта з сесії ${sessionId}`);
-          this.executeLeaveLogic(sessionId, client.id).catch(console.error);
-          this.disconnectTimeouts.delete(sessionId);
-        }, 10000);
+    sessions.forEach((data, sessionId) => {
+      // ВАЖЛИВО: якщо для цього sessionId вже є запланований таймаут
+      // (наприклад, від попереднього швидкого reload) — прибираємо його,
+      // інакше він завиcне і пізніше стре свіжіший запис/спричинить
+      // зайвий leaveSession.
+      const existing = this.disconnectTimeouts.get(sessionId);
+      if (existing) {
+        clearTimeout(existing.timeout);
+        this.disconnectTimeouts.delete(sessionId);
+      }
 
-        // Додаємо кожну сесію в мапу очікування
-        this.disconnectTimeouts.set(sessionId, {
-          timeout,
-          sessionId,
-          auctionId: data.auctionId,
-          auctionAuthId: data.auctionAuthId
-        });
+      const timeout = setTimeout(() => {
+        console.log(`⏳ Час вийшов. Остаточно видаляємо клієнта з сесії ${sessionId}`);
+        this.executeLeaveLogic(sessionId, client.id).catch(console.error);
+        this.disconnectTimeouts.delete(sessionId);
+      }, 10000);
+
+      this.disconnectTimeouts.set(sessionId, {
+        timeout,
+        sessionId,
+        auctionId: data.auctionId,
+        auctionAuthId: data.auctionAuthId,
       });
-    }
+    });
   }
 
   @SubscribeMessage('join_auction')
@@ -146,20 +152,28 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
   @SubscribeMessage('leave_auction')
   async handleLeaveAuction(@ConnectedSocket() client: Socket, @MessageBody() payload: { sessionId: string }) {
     const sessionId = payload?.sessionId;
-    if (sessionId) {
-      client.leave(sessionId);
-      await this.sessionService.leaveSession(sessionId);
+    if (!sessionId) return;
 
-      this.rabbitClient
-        .emit('webrtc_client_disconnect', { sessionId, clientId: client.id })
-        .subscribe({
-          error: (err) => console.error('Помилка відправки webrtc_client_disconnect:', err)
-        });
+    client.leave(sessionId);
 
-      // Очищаємо дані ТІЛЬКИ для цієї конкретної сесії, залишаючи інші активними
-      if (client.data.sessions) {
-        client.data.sessions.delete(sessionId);
-      }
+    // Явний вихід — прибираємо будь-який відкладений тихий-дисконект таймер
+    // для цієї сесії, щоб він пізніше не "воскресив" її своєю логікою.
+    const pending = this.disconnectTimeouts.get(sessionId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      this.disconnectTimeouts.delete(sessionId);
+    }
+
+    await this.sessionService.leaveSession(sessionId, true); // immediate = true
+
+    this.rabbitClient
+      .emit('webrtc_client_disconnect', { sessionId, clientId: client.id })
+      .subscribe({
+        error: (err) => console.error('Помилка відправки webrtc_client_disconnect:', err),
+      });
+
+    if (client.data.sessions) {
+      client.data.sessions.delete(sessionId);
     }
   }
 

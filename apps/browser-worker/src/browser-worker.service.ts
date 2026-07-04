@@ -248,15 +248,6 @@ export class BrowserService {
         if (strategy.isInteractive) {
           this.logger.log(`[BrowserService] Логін для ${url} є інтерактивним. Відкладаємо до підключення клієнта.`);
         } else {
-          this.apiClient.emit('notification.send', {
-            userId: userId,
-            typeName: NotificationEventType.SESSION_STARTED,
-            content: {
-              subject: `[BrowserService] Запуск автологіну`,
-              body: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
-            },
-            sendEmail: false,
-          });
           this.apiClient.emit('session.log.event', {
             sessionId,
             userId: userId,
@@ -311,15 +302,6 @@ export class BrowserService {
       }
     }
 
-    this.apiClient.emit('notification.send', {
-      userId: userId,
-      typeName: NotificationEventType.SESSION_STARTED,
-      content: {
-        subject: `[BrowserService] Context успішно створено.`,
-        body: `[BrowserService] Context для сесії з id: ${sessionId} успішно створено.`,
-      },
-      sendEmail: false,
-    });
     this.apiClient.emit('session.log.event', {
       sessionId,
       userId: userId,
@@ -343,7 +325,11 @@ export class BrowserService {
     const page = await session.context.newPage();
 
     await page.exposeFunction('logActionToNode', (actionType: string, details: string, currentUrl: string) => {
-      const fullMessage = `[Browser Action] ${actionType} на сторінці [${currentUrl}]: ${details}`;
+      // ЗМІНЕНО: чіткіший, однорідний формат — одразу видно ХТО, ЩО і ДЕ зробив,
+      // без потреби вручну парсити довгий текст. currentUrl тепер завжди
+      // приходить з єдиного (не дубльованого) обробника подій в браузері.
+      const urlLabel = currentUrl || 'невідома сторінка';
+      const fullMessage = `Користувач ${userId} -> ${actionType} -> ${details} (сторінка: ${urlLabel})`;
 
       this.apiClient.emit('session.log.event', {
         sessionId,
@@ -353,25 +339,23 @@ export class BrowserService {
         message: fullMessage,
         isIncident: false
       });
-      this.logger.debug(`[User Action] ${actionType} (${currentUrl}) -> ${details}`);
+      this.logger.debug(
+        `[User Action] user=${userId} session=${sessionId} action="${actionType}" url="${urlLabel}" target="${details}"`
+      );
     });
 
-    // 👇 2. Впроваджуємо вдосконалений скрипт аналізу елементів
     await page.addInitScript(() => {
-      // Універсальна функція для отримання зрозумілого опису будь-якого елемента
       const getElementDescription = (el: HTMLElement): string => {
         if (!el) return 'невідомий об\'єкт';
 
         const tagName = el.tagName.toLowerCase();
 
-        // 1. Перевіряємо явні атрибути доступності (найвищий пріоритет)
         const ariaLabel = el.getAttribute('aria-label');
         if (ariaLabel) return `<${tagName}> [aria-label="${ariaLabel}"]`;
 
         const title = el.getAttribute('title');
         if (title) return `<${tagName}> [title="${title}"]`;
 
-        // 2. Перевіряємо ідентифікатори форми
         const id = el.id;
         if (id) return `<${tagName}> [id="${id}"]`;
 
@@ -381,13 +365,11 @@ export class BrowserService {
         const placeholder = el.getAttribute('placeholder');
         if (placeholder) return `<${tagName}> [placeholder="${placeholder}"]`;
 
-        // 3. Перевіряємо текст (використовуємо innerText, щоб ігнорувати прихований текст, або textContent)
         const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
         if (text.length > 0) {
           return `<${tagName}> з текстом "${text.substring(0, 60)}"`;
         }
 
-        // 4. Якщо це кнопка-іконка (без тексту), шукаємо картинку або SVG всередині
         const img = el.querySelector('img');
         if (img && img.getAttribute('alt')) {
           return `<${tagName}> із зображенням [alt="${img.getAttribute('alt')}"]`;
@@ -400,12 +382,9 @@ export class BrowserService {
           if (dataIcon) return `<${tagName}> з іконкою [${dataIcon}]`;
         }
 
-        // 5. ФОЛБЕК: Якщо немає ні тексту, ні ID, будуємо читабельний CSS-контекст
-        // Безпечно отримуємо класи (оскільки у SVG className - це об'єкт, використовуємо getAttribute)
         const className = (el.getAttribute('class') || '').trim().split(/\s+/).slice(0, 2).join('.');
         const classStr = className ? `.${className}` : '';
 
-        // Додаємо інформацію про батьківський елемент, щоб зрозуміти, в якому блоці клікнули
         const parent = el.parentElement;
         if (parent) {
           const parentTag = parent.tagName.toLowerCase();
@@ -419,22 +398,18 @@ export class BrowserService {
         return `<${tagName}${classStr}> (без ідентифікаторів)`;
       };
 
-      // Логування кліків
       document.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         if (!target) return;
 
-        // Шукаємо найближчий інтерактивний елемент
         const interactiveEl = target.closest('button, a, input, select, textarea, [role="button"], [tabindex]') || target;
 
         const description = getElementDescription(interactiveEl as HTMLElement);
         const currentUrl = window.location.href;
 
-        // Відправляємо детальний лог разом з URL
         (window as any).logActionToNode('Клік', description, currentUrl);
       }, true);
 
-      // Логування вводу тексту
       document.addEventListener('change', (e) => {
         const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
         if (!target) return;
@@ -455,46 +430,6 @@ export class BrowserService {
         }
       }, true);
     });
-    await page.addInitScript(() => {
-      // Логування кліків
-      document.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        if (!target) return;
-
-        // Шукаємо найближчий інтерактивний елемент (щоб не логувати кліки по порожніх div)
-        const interactiveEl = target.closest('button, a, input, select, textarea, [role="button"], [tabindex]') || target;
-
-        // Спроба отримати зрозумілу назву елемента
-        let name = interactiveEl.textContent || (interactiveEl as HTMLInputElement).value || interactiveEl.getAttribute('aria-label') || interactiveEl.id || interactiveEl.className || '';
-        name = name.replace(/\s+/g, ' ').trim().substring(0, 50); // Обрізаємо довгий текст
-
-        const tagName = interactiveEl.tagName.toLowerCase();
-
-        // Логуємо тільки якщо клік був по чомусь осмисленому
-        if (name) {
-          (window as any).logActionToNode('Клік', `Елемент <${tagName}> з текстом/id "${name}"`);
-        } else {
-          (window as any).logActionToNode('Клік', `Невідомий елемент <${tagName}>`);
-        }
-      }, true); // true - фаза capture (перехоплюємо раніше за сам сайт)
-
-      // Логування вводу тексту (спрацьовує при втраті фокусу або натисканні Enter)
-      document.addEventListener('change', (e) => {
-        const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-        if (!target) return;
-
-        const tagName = target.tagName.toLowerCase();
-        if (['input', 'textarea', 'select'].includes(tagName)) {
-          // ВАЖЛИВО: Маскуємо паролі!
-          const isPassword = target.type === 'password';
-          const value = isPassword ? '********' : target.value;
-          this.logger.debug(target)
-          const identifier = target.name || target.id || target.getAttribute('aria-label') || target.getAttribute('placeholder') || 'невідоме поле';
-
-          (window as any).logActionToNode('Ввід даних', `Поле "${identifier}" змінило значення на: "${value}"`);
-        }
-      }, true);
-    });
     if (!this.activePages.has(sessionId)) {
       this.activePages.set(sessionId, new Map());
     }
@@ -507,7 +442,6 @@ export class BrowserService {
       .filter(r => r.length > 0 && r !== '/');
 
     if (safeForbiddenRoutes.length > 0) {
-      // Функція нормалізації для Playwright (Node.js середовище)
       const normalizeUrlNode = (u: string) => {
         try {
           const parsed = new URL(u);
@@ -527,7 +461,7 @@ export class BrowserService {
             sessionId,
             userId,
             eventType: SessionEventType.Other,
-            severity: LogSeverity.Info, 
+            severity: LogSeverity.Info,
             message: `[Browser] Перехід на сторінку: ${currentUrl}`,
             isIncident: false
           });
@@ -554,7 +488,6 @@ export class BrowserService {
               isIncident: true
             });
             try {
-              // Відкочуємо сторінку назад або повертаємо на стартову
               const response = await page.goBack({ waitUntil: 'domcontentloaded' });
               if (!response) {
                 await page.goto(session.config.url);
@@ -578,9 +511,7 @@ export class BrowserService {
     let lastFrameBuffer: Buffer | null = null;
     const clientKey = `${sessionId}_${clientId}`;
 
-    // НЕ робимо колбек async, щоб не блокувати потік
     cdpSession.on('Page.screencastFrame', (frameObject) => {
-      // Відправляємо Ack у фоні (catch обов'язковий, бо сесія може вже закритися)
       cdpSession.send('Page.screencastFrameAck', { sessionId: frameObject.sessionId }).catch(() => { });
       lastFrameBuffer = Buffer.from(frameObject.data, 'base64');
     });
@@ -600,15 +531,6 @@ export class BrowserService {
         this.logger.error(`[BrowserService] Помилка інтерактивного логіну: ${error}`);
       });
     }
-    this.apiClient.emit('notification.send', {
-      userId: userId,
-      typeName: NotificationEventType.SESSION_STARTED,
-      content: {
-        subject: `[BrowserService] Вкладку створено`,
-        body: `[BrowserService] Вкладку для користувача ${userId} створено.`,
-      },
-      sendEmail: false,
-    });
     this.apiClient.emit('session.log.event', {
       sessionId,
       userId: userId,
@@ -641,12 +563,9 @@ export class BrowserService {
     if (!page) return;
 
     const clientKey = `${sessionId}_${clientId}`;
-
-    // 1. ДІЇ, ЩО НЕ ПОТРЕБУЮТЬ ЧЕРГИ (Рух та скрол виконуються миттєво)
     if (action.type === 'mousemove' || action.type === 'wheel') {
       try {
         if (action.type === 'mousemove') {
-          // ПРИБРАНО { steps: 2 }, бо це дуже уповільнювало Playwright!
           await page.mouse.move(action.x, action.y);
         } else if (action.type === 'wheel') {
           await page.mouse.wheel(action.deltaX, action.deltaY);
@@ -654,10 +573,9 @@ export class BrowserService {
       } catch (e) {
         this.logger.debug(`[Browser] Помилка миттєвої дії: ${(e as Error).message}`);
       }
-      return; // Виходимо, щоб ці дії не блокували чергу
+      return;
     }
 
-    // 2. ДІЇ, ЯКІ ПОТРЕБУЮТЬ СТРОГОЇ ЧЕРГИ (Кліки та клавіатура)
     const previousAction = this.actionQueues.get(clientKey) || Promise.resolve();
 
     const currentAction = previousAction.then(async () => {
@@ -666,7 +584,6 @@ export class BrowserService {
           case 'mousedown': {
             const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
 
-            // ГАРАНТІЯ ТОЧНОСТІ: Примусово ставимо мишку туди, де був клік на фронті
             if (action.x !== undefined && action.y !== undefined) {
               await page.mouse.move(action.x, action.y);
             }

@@ -211,6 +211,7 @@ DROP TABLE IF EXISTS `car_orders`;
 /*!40101 SET character_set_client = utf8mb4 */;
 CREATE TABLE `car_orders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user` text DEFAULT NULL,
   `first_name` varchar(100) DEFAULT NULL,
   `last_name` varchar(100) DEFAULT NULL,
   `phone` varchar(255) DEFAULT NULL,
@@ -243,7 +244,7 @@ CREATE TABLE `car_orders` (
 
 LOCK TABLES `car_orders` WRITE;
 /*!40000 ALTER TABLE `car_orders` DISABLE KEYS */;
-INSERT INTO `car_orders` VALUES (1,'Sdfu','rtyy','093723','','Bmw, Renault','28,208','1, 1er','Diesel, Gas','Automatic',NULL,1672524000,1704059999,10000.00,15000.00,150000,300000,'111','222','2025-09-15 00:52:46','2025-09-15 00:52:46',1233,1345);
+INSERT INTO `car_orders` VALUES (1,NULL,'Sdfu','rtyy','093723','','Bmw, Renault','28,208','1, 1er','Diesel, Gas','Automatic',NULL,1672524000,1704059999,10000.00,15000.00,150000,300000,'111','222','2025-09-15 00:52:46','2025-09-15 00:52:46',1233,1345);
 /*!40000 ALTER TABLE `car_orders` ENABLE KEYS */;
 UNLOCK TABLES;
 

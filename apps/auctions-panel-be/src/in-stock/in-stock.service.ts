@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ExternalDbManager } from '../client-db/client-db.service';
 
 @Injectable()
@@ -60,7 +60,11 @@ export class InStockService {
                     model: row.model || 'Невідомо',
                     year: year,
                     mileage: row.mileage || 0,
-                    engine: `${row.eng_capacity ? row.eng_capacity + ' см3 ' : ''}${row.fuel || ''}`.trim(),
+                    // Раніше тут конкатенувалося eng_capacity + fuel при кожному читанні,
+                    // а весь рядок зберігався назад у fuel при кожному редагуванні —
+                    // це й спричиняло дублювання об'єму двигуна. Тепер fuel зберігає
+                    // повний текст "двигуна" як єдине джерело правди.
+                    engine: (row.fuel || '').trim(),
                     transmission: row.transmission || 'Не вказано',
                     price: row.price || 0,
                     chassis: row.chassis || '',
@@ -70,91 +74,107 @@ export class InStockService {
                 };
             });
         } catch (error) {
-            this.logger.error(`Помилка отримання автомобілів: ${error.message}`);
+            this.logger.error(`Помилка отримання автомобілів: ${(error as Error).message}`);
             throw new InternalServerErrorException('Не вдалося завантажити список автомобілів');
         }
     }
- async createCar(dbName: string, carData: any) {
-    try {
-        const pool = await this.dbManager.getConnection(dbName);
-        
-        let statusNum = 0;
-        if (carData.status === 'reserved') statusNum = 1;
-        if (carData.status === 'sold') statusNum = 2;
+    async createCar(dbName: string, carData: any) {
+        try {
+            // Базова валідація: не дозволяємо створити "порожнє" авто
+            if (!carData.brand || !carData.model || !carData.price || Number(carData.price) <= 0) {
+                throw new BadRequestException('Заповніть обов\'язкові поля: марка, модель, ціна');
+            }
+            // Нове авто не може одразу мати статус "продано"
+            if (carData.status === 'sold') {
+                throw new BadRequestException('Неможливо створити нове авто зі статусом "Продано"');
+            }
 
-        const firstOnRoad = carData.year ? new Date(carData.year, 0, 1).getTime() / 1000 : 0;
+            const pool = await this.dbManager.getConnection(dbName);
 
-        // Жорстке обмеження для трансмісії
-        const transmission = ['Automatic', 'Mechanic'].includes(carData.transmission) 
-            ? carData.transmission 
-            : 'Automatic';
+            let statusNum = 0;
+            if (carData.status === 'reserved') statusNum = 1;
+            if (carData.status === 'sold') statusNum = 2;
 
-        // Додали fuel (куди записуємо engine)
-        const query = `
+            const firstOnRoad = carData.year ? new Date(carData.year, 0, 1).getTime() / 1000 : 0;
+
+            // Жорстке обмеження для трансмісії
+            const transmission = ['Automatic', 'Mechanic'].includes(carData.transmission)
+                ? carData.transmission
+                : 'Automatic';
+
+            // Додали fuel (куди записуємо engine)
+            const query = `
             INSERT INTO cars_for_sale 
             (brand_id, model_id, price, transmission, fuel, mileage, chassis, status, first_on_road, photos, location, auction_id) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
-        
-        const [result] = await pool.query(query, [
-            carData.brand_id || 1, 
-            carData.model_id || 1, 
-            carData.price || 0,
-            transmission,          // Оновлено
-            carData.engine || '',  // Зберігаємо engine в колонку fuel
-            carData.mileage || 0,
-            carData.chassis || '',
-            statusNum,
-            firstOnRoad,
-            carData.imageUrl || '',
-            carData.location || '',
-            0
-        ]);
 
-        return { success: true, insertId: (result as any).insertId };
-    } catch (error) {
-        this.logger.error(`Помилка створення авто: ${error.message}`);
-        throw new InternalServerErrorException('Не вдалося створити авто');
+            const [result] = await pool.query(query, [
+                carData.brand_id || 1,
+                carData.model_id || 1,
+                carData.price || 0,
+                transmission,          // Оновлено
+                carData.engine || '',  // Зберігаємо engine в колонку fuel
+                carData.mileage || 0,
+                carData.chassis || '',
+                statusNum,
+                firstOnRoad,
+                carData.imageUrl || '',
+                carData.location || '',
+                0
+            ]);
+
+            return { success: true, insertId: (result as any).insertId };
+        } catch (error) {
+            if (error instanceof BadRequestException) throw error;
+            this.logger.error(`Помилка створення авто: ${(error as Error).message}`);
+            throw new InternalServerErrorException('Не вдалося створити авто');
+        }
     }
-}
 
-async updateCar(dbName: string, id: number, carData: any) {
-    try {
-        const pool = await this.dbManager.getConnection(dbName);
-        
-        let statusNum = 0;
-        if (carData.status === 'reserved') statusNum = 1;
-        if (carData.status === 'sold') statusNum = 2;
+    async updateCar(dbName: string, id: number, carData: any) {
+        try {
+            // Базова валідація: не дозволяємо зберегти "порожнє" авто
+            if (!carData.brand || !carData.model || !carData.price || Number(carData.price) <= 0) {
+                throw new BadRequestException('Заповніть обов\'язкові поля: марка, модель, ціна');
+            }
 
-        const firstOnRoad = carData.year ? new Date(carData.year, 0, 1).getTime() / 1000 : 0;
+            const pool = await this.dbManager.getConnection(dbName);
 
-        const transmission = ['Automatic', 'Mechanic'].includes(carData.transmission) 
-            ? carData.transmission 
-            : 'Automatic';
+            let statusNum = 0;
+            if (carData.status === 'reserved') statusNum = 1;
+            if (carData.status === 'sold') statusNum = 2;
 
-        // Додали оновлення fuel
-        const query = `
+            const firstOnRoad = carData.year ? new Date(carData.year, 0, 1).getTime() / 1000 : 0;
+
+            const transmission = ['Automatic', 'Mechanic'].includes(carData.transmission)
+                ? carData.transmission
+                : 'Automatic';
+
+            // Додали оновлення fuel
+            const query = `
             UPDATE cars_for_sale 
             SET price = ?, transmission = ?, fuel = ?, mileage = ?, chassis = ?, status = ?, first_on_road = ?, photos = ?
             WHERE id = ?
         `;
-        
-        await pool.query(query, [
-            carData.price,
-            transmission,         // Оновлено
-            carData.engine || '', // Оновлено
-            carData.mileage,
-            carData.chassis,
-            statusNum,
-            firstOnRoad,
-            carData.imageUrl,
-            id
-        ]);
 
-        return { success: true };
-    } catch (error) {
-        this.logger.error(`Помилка оновлення авто: ${error.message}`);
-        throw new InternalServerErrorException('Не вдалося оновити авто');
+            await pool.query(query, [
+                carData.price,
+                transmission,         // Оновлено
+                carData.engine || '', // Оновлено
+                carData.mileage,
+                carData.chassis,
+                statusNum,
+                firstOnRoad,
+                carData.imageUrl,
+                id
+            ]);
+
+            return { success: true };
+        } catch (error) {
+            if (error instanceof BadRequestException) throw error;
+            this.logger.error(`Помилка оновлення авто: ${(error as Error).message}`);
+            throw new InternalServerErrorException('Не вдалося оновити авто');
+        }
     }
-}
 }

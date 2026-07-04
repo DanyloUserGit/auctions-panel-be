@@ -24,6 +24,53 @@ export class NotificationService {
 
         return 0;
     }
+
+    /**
+     * Користувач належить щонайбільше одній групі (User.auctionGroupId),
+     * тож обов'язковість перевіряється відносно саме цієї групи.
+     */
+    private async getMandatoryTypeIdsForUser(userId: string): Promise<Set<string>> {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { auctionGroupId: true }
+        });
+
+        if (!user?.auctionGroupId) {
+            return new Set();
+        }
+
+        const requirements = await this.prisma.groupNotificationRequirement.findMany({
+            where: {
+                groupId: user.auctionGroupId,
+                isMandatory: true
+            },
+            select: { notificationTypeId: true }
+        });
+
+        return new Set(requirements.map(r => r.notificationTypeId));
+    }
+
+    private async isMandatoryForUser(userId: string, typeId: string): Promise<boolean> {
+        const user = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { auctionGroupId: true }
+        });
+
+        if (!user?.auctionGroupId) {
+            return false;
+        }
+
+        const requirement = await this.prisma.groupNotificationRequirement.findFirst({
+            where: {
+                groupId: user.auctionGroupId,
+                notificationTypeId: typeId,
+                isMandatory: true
+            }
+        });
+
+        return !!requirement;
+    }
+
     async getUserSettings(userId: string) {
         const user = await this.prisma.user.findUnique({
             where: { id: userId }
@@ -33,17 +80,25 @@ export class NotificationService {
             throw new UnauthorizedException("Користувача не знайдено");
         }
 
-        return this.prisma.userNotificationSetting.findMany({
-            where: {
-                userId,
-                notificationType: {
-                    configType: 'Configurable'
+        const [settings, mandatoryTypeIds] = await Promise.all([
+            this.prisma.userNotificationSetting.findMany({
+                where: {
+                    userId,
+                    notificationType: {
+                        configType: 'Configurable'
+                    }
+                },
+                include: {
+                    notificationType: true
                 }
-            },
-            include: {
-                notificationType: true
-            }
-        });
+            }),
+            this.getMandatoryTypeIdsForUser(userId)
+        ]);
+
+        return settings.map(setting => ({
+            ...setting,
+            isMandatory: mandatoryTypeIds.has(setting.notificationTypeId)
+        }));
     }
     private async notifyUser(
         userId: string,
@@ -211,6 +266,27 @@ export class NotificationService {
             throw new BadRequestException("Цей тип сповіщень не налаштовується.");
         }
 
+        // Якщо користувач намагається вимкнути обов'язкове (для його групи) сповіщення — забороняємо
+        if (updateDto.isEnabled === false) {
+            const isMandatory = await this.isMandatoryForUser(userId, typeId);
+            if (isMandatory) {
+                throw new BadRequestException("Це сповіщення є обов'язковим для вашої групи і не може бути вимкнене");
+            }
+        }
+
+        // Валідація користувацького значення (наприклад, "за скільки часу нагадати про завершення аукціону")
+        if (updateDto.value !== undefined) {
+            const setting = type.setting as { min?: number; max?: number } | null;
+            if (setting && typeof setting === 'object') {
+                if (setting.min !== undefined && updateDto.value < setting.min) {
+                    throw new BadRequestException(`Значення не може бути меншим за ${setting.min}`);
+                }
+                if (setting.max !== undefined && updateDto.value > setting.max) {
+                    throw new BadRequestException(`Значення не може бути більшим за ${setting.max}`);
+                }
+            }
+        }
+
         return this.prisma.userNotificationSetting.update({
             where: {
                 userId_notificationTypeId: {
@@ -218,7 +294,10 @@ export class NotificationService {
                     notificationTypeId: typeId
                 }
             },
-            data: updateDto
+            data: updateDto,
+            include: {
+                notificationType: true
+            }
         });
     }
     async getNotifications(userId: string, page: number = 1, limit: number = 20) {
@@ -285,12 +364,56 @@ export class NotificationService {
             throw new ForbiddenException("Тільки адміністратор групи може змінювати ці налаштування");
         }
 
+        const type = await this.prisma.notificationType.findUnique({ where: { id: typeId } });
+        if (!type || type.configType !== 'Configurable') {
+            throw new BadRequestException("Обов'язковим можна зробити лише налаштовуваний тип сповіщення");
+        }
+
         return this.prisma.groupNotificationRequirement.upsert({
             where: { groupId_notificationTypeId: { groupId, notificationTypeId: typeId } },
             update: { isMandatory },
             create: { groupId, notificationTypeId: typeId, isMandatory }
         });
     }
+
+    /**
+     * Список усіх налаштовуваних типів сповіщень для групи разом з поточним
+     * статусом isMandatory — для екрану адміністрування групи.
+     */
+    async getGroupRequirements(adminUserId: string, groupId: string) {
+        const group = await this.prisma.auctionGroup.findUnique({ where: { id: groupId } });
+
+        if (!group || group.AdminId !== adminUserId) {
+            throw new ForbiddenException("Тільки адміністратор групи може переглядати ці налаштування");
+        }
+
+        const [types, requirements] = await Promise.all([
+            this.prisma.notificationType.findMany({ where: { configType: 'Configurable' } }),
+            this.prisma.groupNotificationRequirement.findMany({ where: { groupId } })
+        ]);
+
+        const requirementByType = new Map(requirements.map(r => [r.notificationTypeId, r.isMandatory]));
+
+        return types.map(t => ({
+            typeId: t.id,
+            name: t.name,
+            description: t.description,
+            isMandatory: requirementByType.get(t.id) ?? false
+        }));
+    }
+
+    /**
+     * Групи, де поточний користувач є адміністратором. AdminId унікальний
+     * на AuctionGroup, тож користувач керує щонайбільше однією групою —
+     * але для зручності фронтенду (селектор) повертаємо масив.
+     */
+    async getMyAdminGroups(userId: string) {
+        return this.prisma.auctionGroup.findMany({
+            where: { AdminId: userId },
+            select: { id: true, title: true }
+        });
+    }
+
     async seedNotificationTypes() {
         const types = [
             {

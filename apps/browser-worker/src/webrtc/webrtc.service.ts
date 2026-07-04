@@ -140,7 +140,9 @@ export class WebrtcService {
   private startVideoStreaming(sessionId: string, clientId: string, viewport: { width: number; height: number }) {
     const port = Math.floor(Math.random() * (60000 - 50000) + 50000);
     const udpSocket = dgram.createSocket('udp4');
-    udpSocket.bind(port);
+    udpSocket.bind(port, () => {
+      udpSocket.setRecvBufferSize(4 * 1024 * 1024);
+    });
 
     const clientKey = `${sessionId}_${clientId}`;
 

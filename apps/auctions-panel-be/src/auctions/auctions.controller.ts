@@ -1,5 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, ApiQuery, getSchemaPath } from '@nestjs/swagger';
+import { Roles } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { RolesDecorator } from '../decorators/roles.decorator';
 import { AuctionsService } from './auctions.service';
 import { AddPathSchema, AddPathSwaggerDto, type AddPathDto } from './dto/add-path.dto';
 import { AddSelectorSchema, AddSelectorSwaggerDto, type AddSelectorDto } from './dto/add-selector.dto';
@@ -11,6 +15,7 @@ import {
 } from './dto/create-auction.dto';
 import { UpdateAuctionSchema, type UpdateAuctionDto } from './dto/update-auction.dto';
 
+@UseGuards(JwtAuthGuard)
 @Controller('auctions')
 export class AuctionsController {
   constructor(private readonly auctionsService: AuctionsService) { }
@@ -40,6 +45,8 @@ export class AuctionsController {
     return this.auctionsService.getAllowedPath(auctionId);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Post(':id/add-user')
   @ApiBody({ type: AddUserSwaggerDto })
   @ApiCreatedResponse({
@@ -48,66 +55,79 @@ export class AuctionsController {
       allOf: [{ $ref: getSchemaPath(AddUserSwaggerDto) }],
     },
   })
-  addUser(@Param('id') auctionId: string, @Body() body: AddUserDto) {
+  addUser(@Param('id') auctionId: string, @Body() body: AddUserDto, @Req() req) {
     const data = AddUserSchema.parse(body);
-    return this.auctionsService.addUser(auctionId, data.userId);
+    return this.auctionsService.addUser(auctionId, data.userId, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Post(':id/selector')
   @ApiBody({ type: AddSelectorSwaggerDto })
   @ApiCreatedResponse({
     description: 'Selector is now forbidden',
   })
-  addSelector(@Param('id') auctionId: string, @Body() body: AddSelectorDto) {
+  addSelector(@Param('id') auctionId: string, @Body() body: AddSelectorDto, @Req() req) {
     const data = AddSelectorSchema.parse(body);
-    return this.auctionsService.addSelector(auctionId, data);
+    return this.auctionsService.addSelector(auctionId, data, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Post(':id/allowed')
   @ApiBody({ type: AddPathSwaggerDto })
   @ApiCreatedResponse({
     description: 'Path is allowed',
   })
-  addPathAllowed(@Param('id') auctionId: string, @Body() body: AddPathDto) {
+  addPathAllowed(@Param('id') auctionId: string, @Body() body: AddPathDto, @Req() req) {
     const data = AddPathSchema.parse(body);
-    return this.auctionsService.addPathAllowed(auctionId, data);
+    return this.auctionsService.addPathAllowed(auctionId, data, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Post(':id/forbidden')
   @ApiBody({ type: AddPathSwaggerDto })
   @ApiCreatedResponse({
     description: 'Path is allowed',
   })
-  addPathForbidden(@Param('id') auctionId: string, @Body() body: AddPathDto) {
+  addPathForbidden(@Param('id') auctionId: string, @Body() body: AddPathDto, @Req() req) {
     const data = AddPathSchema.parse(body);
-    return this.auctionsService.addPathForbidden(auctionId, data);
+    return this.auctionsService.addPathForbidden(auctionId, data, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Delete('remove-allowed-path/:id')
   @ApiCreatedResponse({
     description: 'Path deleted',
   })
-  deletePathAllowed(@Param('id') id: string) {
-    return this.auctionsService.deletePathAllowed(id);
+  deletePathAllowed(@Param('id') id: string, @Req() req) {
+    return this.auctionsService.deletePathAllowed(id, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Delete('remove-forbidden-path/:id')
   @ApiCreatedResponse({
     description: 'Path deleted',
   })
-  deletePathForbidden(@Param('id') id: string) {
-    return this.auctionsService.deletePathForbidden(id);
+  deletePathForbidden(@Param('id') id: string, @Req() req) {
+    return this.auctionsService.deletePathForbidden(id, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Delete('remove-forbidden-selector/:id')
   @ApiCreatedResponse({
     description: 'Path deleted',
   })
-  deleteSelectorForbidden(@Param('id') id: string) {
-    return this.auctionsService.deleteSelector(id);
+  deleteSelectorForbidden(@Param('id') id: string, @Req() req) {
+    return this.auctionsService.deleteSelector(id, req.user);
   }
 
-
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Delete(':id/remove-user')
   @ApiBody({ type: AddUserSwaggerDto })
   @ApiCreatedResponse({
@@ -116,13 +136,14 @@ export class AuctionsController {
       allOf: [{ $ref: getSchemaPath(AddUserSwaggerDto) }],
     },
   })
-  removeUser(@Param('id') auctionId: string, @Body() body: AddUserDto) {
+  removeUser(@Param('id') auctionId: string, @Body() body: AddUserDto, @Req() req) {
     const data = AddUserSchema.parse(body);
-    return this.auctionsService.removeUser(auctionId, data.userId);
+    return this.auctionsService.removeUser(auctionId, data.userId, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Post()
-
   @ApiBody({ type: CreateAuctionSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -138,9 +159,9 @@ export class AuctionsController {
       ],
     },
   })
-  create(@Body() createAuctionDto: CreateAuctionDto) {
+  create(@Body() createAuctionDto: CreateAuctionDto, @Req() req) {
     const data = CreateAuctionSchema.parse(createAuctionDto);
-    return this.auctionsService.create(data);
+    return this.auctionsService.create(data, req.user);
   }
 
   @Get('group/:groupId')
@@ -153,8 +174,9 @@ export class AuctionsController {
     return this.auctionsService.findOne(id, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Patch(':id')
-
   @ApiBody({ type: CreateAuctionSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -170,14 +192,15 @@ export class AuctionsController {
       ],
     },
   })
-  update(@Param('id') id: string, @Body() updateAuctionDto: UpdateAuctionDto) {
+  update(@Param('id') id: string, @Body() updateAuctionDto: UpdateAuctionDto, @Req() req) {
     const data = UpdateAuctionSchema.parse(updateAuctionDto);
-    return this.auctionsService.update(id, data);
+    return this.auctionsService.update(id, data, req.user);
   }
 
-
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.auctionsService.remove(id);
+  remove(@Param('id') id: string, @Req() req) {
+    return this.auctionsService.remove(id, req.user);
   }
 }

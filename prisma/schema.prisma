@@ -263,6 +263,7 @@ model AuctionGroup {
 
   sessionLimit        Int     @default(0)
   canGaManageAccounts Boolean @default(false)
+  showAccounts        Boolean @default(true)
   rules               Json?   @default("{}")
   accounts            User[]  @relation("GroupAccountAccess")
 
