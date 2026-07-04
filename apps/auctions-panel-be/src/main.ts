@@ -29,7 +29,7 @@ async function bootstrap() {
   SwaggerModule.setup('/api/docs', app, documentFactory);
 
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org'],
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://panel.caddyluck.com.ua', 'https://panel.caddyluck.com.ua/'],
     credentials: true,
   });
   app.use(cookieParser());

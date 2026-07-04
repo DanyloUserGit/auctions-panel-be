@@ -7,13 +7,13 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
-import * as crypto from 'crypto';
-import type { LoginDto } from './dto/LoginDto';
-import { UsersService } from '../users/users.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { verifyPassword } from '../utils/password';
-import { NotificationService } from '../notification/notification.service';
 import axios from 'axios';
+import * as crypto from 'crypto';
+import { NotificationService } from '../notification/notification.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
+import { verifyPassword } from '../utils/password';
+import type { LoginDto } from './dto/LoginDto';
 
 @Injectable()
 export class AuthService {
@@ -32,7 +32,7 @@ export class AuthService {
         response: token,
       },
     );
-
+    console.log(response.data);
     if (!response.data.success) {
       throw new ForbiddenException('Капча не пройдена або застаріла');
     }
@@ -58,7 +58,7 @@ export class AuthService {
       throw new NotFoundException('Користувача не знайдено');
     }
 
-    if(existing.isBlocked){
+    if (existing.isBlocked) {
       throw new ForbiddenException('Користувача заблоковано');
     }
 
@@ -88,10 +88,6 @@ export class AuthService {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    this.notificationService.notify(payload.id, "USER_LOGED_IN", {
-      subject: "Новий вхід до системи",
-      body: `Користувач ${payload.firstName} ${payload.lastName} увійшов в систему.`
-    }, false)
 
     return { accessToken, refreshToken };
   }

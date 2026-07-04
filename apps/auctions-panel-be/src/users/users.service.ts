@@ -53,6 +53,7 @@ export class UsersService {
       where: { id },
       include: {
         auctionGroup: true,
+        managedGroup: true,
         session: {
           include: { auction: true },
         },
@@ -79,7 +80,8 @@ export class UsersService {
         phone: user.phone,
         city: user.city,
         role: user.role,
-        group: user.auctionGroup?.title || 'Без групи',
+        auctionGroup: user.auctionGroup || null,
+        managedGroup: user.managedGroup || null,
       },
       status: {
         isActive: user.isActive,
@@ -117,8 +119,27 @@ export class UsersService {
       data: statusData,
     });
   }
-  async findAll() {
-    return await this.prisma.user.findMany({ include: { managedGroup: true } });
+  async findAll(user: any) {
+    try {
+      if (!user) throw new NotFoundException();
+
+      if (user.role === Roles.User) throw new ForbiddenException();
+
+      if (user.role === Roles.Admin) {
+        if (user) {
+          return await this.prisma.user.findMany({
+            where: {
+              auctionGroupId: user.managedGroup.id
+            }
+          });
+        }
+      }
+      if (user.role === Roles.SuperAdmin) return await this.prisma.user.findMany({ include: { managedGroup: true } });
+
+      return {};
+    } catch (error) {
+      throw error;
+    }
   }
 
   async findOne(id: string) {
@@ -132,7 +153,9 @@ export class UsersService {
         role: true,
         rights: true,
         phone: true,
+        city: true,
         auctionGroupId: true,
+        auctionGroup: true,
         managedGroup: true
       },
     });

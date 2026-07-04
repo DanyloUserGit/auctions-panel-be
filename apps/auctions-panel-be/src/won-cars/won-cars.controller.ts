@@ -10,8 +10,8 @@ export class WonCarsController {
     // @UseGuards(JwtAuthGuard)
     @Get()
     async getPurchases(@Req() req, @Query('dbName') dbName: string, @Query('page') page = 1) {
-        const userId = req.user.id; // Отримуємо з токена
-        const isAdmin = req.user.role === Roles.SuperAdmin; // Ваша логіка ролей
+        const userId = req.user.id; 
+        const isAdmin = req.user.role === Roles.SuperAdmin; 
 
         const limit = 20;
         const offset = (page - 1) * limit;

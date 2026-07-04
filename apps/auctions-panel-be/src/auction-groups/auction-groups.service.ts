@@ -1,15 +1,18 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Roles, User } from '@prisma/client';
 
+import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAuctionGroupDto } from './dto/create-auction-group.dto';
 import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
 
 @Injectable()
 export class AuctionGroupsService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) { }
 
-  // Хелпер для прорахунку кількості та форматування результату
   private withCounts(data: any | any[]) {
     if (!data) return data;
 
@@ -18,7 +21,6 @@ export class AuctionGroupsService {
       const usersCount = (group._count?.users || 0) + adminCount;
       const auctionsCount = group._count?.auctions || 0;
 
-      // Можна видалити _count, щоб не дублювати дані, але залишаємо для сумісності
       return {
         ...group,
         usersCount,
@@ -41,8 +43,8 @@ export class AuctionGroupsService {
       delete createAuctionGroupDto.sessionLimit;
       delete createAuctionGroupDto.canGaManageAccounts;
     }
-    
-    return await this.prisma.auctionGroup.create({
+
+    const group = await this.prisma.auctionGroup.create({
       data: {
         ...rest,
         ...(Admin && {
@@ -68,6 +70,19 @@ export class AuctionGroupsService {
         accounts: true,
       },
     });
+
+    if (users && users.length > 0) {
+      await Promise.all(
+        users.map((userId) =>
+          this.notificationService.notify(userId, 'ADDED_TO_GROUP', {
+            subject: 'Додавання до групи',
+            body: `Вас додано до групи аукціонів "${group.title}"`,
+          }),
+        ),
+      );
+    }
+
+    return group;
   }
 
   async findAll(user?: { id: string; role: Roles }) {
@@ -99,25 +114,33 @@ export class AuctionGroupsService {
       return this.withCounts(groups);
     }
 
+    const userFull = await this.prisma.user.findFirst({
+      where: { id: user.id },
+      select: { auctionGroupId: true }
+    });
+
     const groups = await this.prisma.auctionGroup.findMany({
       where: {
-        auctions: {
-          some: {
-            users: {
+        OR: [
+          {
+            auctions: {
               some: {
-                id: user.id,
+                users: {
+                  some: { id: user.id },
+                },
               },
             },
           },
-        },
+          {
+            id: userFull?.auctionGroupId || undefined,
+          }
+        ],
       },
       include: {
         auctions: {
           where: {
             users: {
-              some: {
-                id: user.id,
-              },
+              some: { id: user.id },
             },
           },
         },
@@ -125,6 +148,8 @@ export class AuctionGroupsService {
         _count: { select: { users: true, auctions: true } },
       },
     });
+
+    return this.withCounts(groups);
     return this.withCounts(groups);
   }
 
@@ -213,7 +238,7 @@ export class AuctionGroupsService {
 
     const { auctions, Admin, users, ...rest } = updateAuctionGroupDto;
 
-    return await this.prisma.auctionGroup.update({
+    const group = await this.prisma.auctionGroup.update({
       where: { id },
       data: {
         ...rest,
@@ -238,6 +263,19 @@ export class AuctionGroupsService {
         auctions: true,
       },
     });
+
+    if (users && users.length > 0) {
+      await Promise.all(
+        users.map((userId) =>
+          this.notificationService.notify(userId, 'ADDED_TO_GROUP', {
+            subject: 'Додавання до групи',
+            body: `Вас додано до групи аукціонів "${group.title}"`,
+          }),
+        ),
+      );
+    }
+
+    return group;
   }
 
   async blockGroup(id: string) {

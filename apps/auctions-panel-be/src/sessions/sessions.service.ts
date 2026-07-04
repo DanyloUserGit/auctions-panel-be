@@ -6,11 +6,18 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { Roles, Session, SessionEventType, SessionRights } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { decryptData } from '../utils/encrypt';
-import { SessionLoggerService } from '../session-logger/session-logger.service';
+import { Roles, Session, SessionEventType } from '@prisma/client';
 import { NotificationService } from '../notification/notification.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { SessionLoggerService } from '../session-logger/session-logger.service';
+import { decryptData } from '../utils/encrypt';
+
+type AuthUser = {
+  id: string;
+  role: Roles;
+  auctionGroupId?: string | null;
+  managedGroup?: { id: string } | null;
+};
 
 @Injectable()
 export class SessionsService implements OnModuleInit {
@@ -31,9 +38,23 @@ export class SessionsService implements OnModuleInit {
       console.error('❌ Помилка підключення API до RabbitMQ:', error);
     }
   }
-  async getSessions(auctionAuthId: string) {
+
+  private getUserGroupId(user: AuthUser): string | null {
+    if (user.role === Roles.Admin) {
+      return user.managedGroup?.id ?? null;
+    }
+    return user.auctionGroupId ?? null;
+  }
+
+  async getSessions(auctionAuthId: string, requester: AuthUser) {
+    const where: any = { auctionAuthId, isActive: true };
+
+    if (requester.role === Roles.Admin) {
+      where.auctionGroupId = this.getUserGroupId(requester);
+    }
+
     return this.prisma.session.findMany({
-      where: { auctionAuthId },
+      where,
       orderBy: {
         isActive: 'desc',
       },
@@ -108,11 +129,15 @@ export class SessionsService implements OnModuleInit {
       throw new BadRequestException('Ця сесія вже завершена');
     }
 
-    const admin = await this.prisma.user.findUnique({ where: { id: adminId } });
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminId },
+      include: { managedGroup: { select: { id: true } } },
+    });
     if (!admin) throw new ForbiddenException('Користувача не знайдено');
 
     if (admin.role !== Roles.SuperAdmin) {
-      if (admin.role !== Roles.Admin || session.auctionGroupId !== admin.auctionGroupId) {
+      const adminGroupId = this.getUserGroupId(admin as unknown as AuthUser);
+      if (admin.role !== Roles.Admin || session.auctionGroupId !== adminGroupId) {
         throw new ForbiddenException('У вас немає прав для завершення сесії іншої групи');
       }
     }
@@ -141,7 +166,7 @@ export class SessionsService implements OnModuleInit {
     if (user) {
       this.notificationService.notify(adminId, "SESSION_ENDED", {
         subject: "Сесія примусово завершена",
-        body: `Користувач ${user.firstName} ${user.lastName} примусово закінчив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
+        body: `Користувач ${user.firstName} ${user.lastName} примусово закінчив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.title}.`
       }, false)
     }
 
@@ -162,7 +187,64 @@ export class SessionsService implements OnModuleInit {
     return updatedSession;
   }
 
+  async getActiveSessionsForUser(userId: string) {
+    return this.prisma.session.findMany({
+      where: {
+        isActive: true,
+        users: { some: { id: userId } },
+      },
+      select: {
+        id: true,
+        auctionId: true,
+        auctionAuthId: true,
+      },
+    });
+  }
+
+  // ДОДАНО: перевірка, що userId дійсно має право використовувати саме цей
+  // auctionAuthId (акаунт) для саме цього auctionId. Без цього WebSocket-подія
+  // 'join_auction' (session.gateway.ts) дозволяла підставити чужий auctionAuthId
+  // і реально стартувати сесію під чужими обліковими даними іншої групи.
+  private async assertUserCanUseAccount(userId: string, auctionId: string, auctionAuthId: string) {
+    const auctionAuth = await this.prisma.auctionAuth.findUnique({
+      where: { id: auctionAuthId },
+      select: {
+        auctionId: true,
+        auction: {
+          select: {
+            auctionGroupId: true,
+            users: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    if (!auctionAuth || auctionAuth.auctionId !== auctionId) {
+      throw new ForbiddenException('Обраний акаунт не належить цьому аукціону');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, auctionGroupId: true, managedGroup: { select: { id: true } } },
+    });
+
+    if (!user) {
+      throw new ForbiddenException('Користувача не знайдено');
+    }
+
+    if (user.role === Roles.SuperAdmin) return;
+
+    const explicitlyAllowed = auctionAuth.auction.users.some((u) => u.id === userId);
+    const userGroupId = this.getUserGroupId(user as unknown as AuthUser);
+    const sameGroup = !!userGroupId && userGroupId === auctionAuth.auction.auctionGroupId;
+
+    if (!explicitlyAllowed && !sameGroup) {
+      throw new ForbiddenException('У вас немає доступу до цього акаунта аукціону');
+    }
+  }
+
   async initializeSession(
+    isReconnect: boolean,
     userId: string,
     auctionId: string,
     auctionAuthId: string,
@@ -170,6 +252,9 @@ export class SessionsService implements OnModuleInit {
     height: number,
     sessionId?: string
   ) {
+    // ДОДАНО: перевірка прав ПЕРЕД будь-якою роботою з реальними даними авторизації.
+    await this.assertUserCanUseAccount(userId, auctionId, auctionAuthId);
+
     const auction = await this.prisma.auction.findUnique({
       where: { id: auctionId }, include: {
         allowedRoutes: true,
@@ -183,21 +268,23 @@ export class SessionsService implements OnModuleInit {
       throw new BadRequestException('Не знайдено облікових даних для цього аукціону');
     }
 
-    console.log(`[SessionsService] Знайдено заборонених роутів для ${auctionId}:`, auction?.forbiddenRoutes);
-
     const allowedRoutesArr = auction.allowedRoutes.map(route => route.path);
     const forbiddenRoutesArr = auction.forbiddenRoutes.map(route => route.path);
     const forbiddenSelectorsArr = auction.forbiddenSelectors.map(sel => sel.selector);
 
-    console.log(`[SessionsService] Масив шляхів для відправки:`, forbiddenRoutesArr);
-
     let session: Session | null = null;
     if (sessionId) {
       session = await this.prisma.session.findUnique({ where: { id: sessionId } });
+      const existingTimeout = this.pendingClosures.get(sessionId);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+        this.pendingClosures.delete(sessionId);
+        console.log(`[SessionsService] Таймер закриття сесії ${sessionId} скасовано (користувач повернувся)`);
+      }
     }
     if (!session) {
       session = await this.prisma.session.findFirst({
-        where: { auctionId, isActive: true },
+        where: { auctionId, auctionAuthId, isActive: true },
       });
     }
 
@@ -206,26 +293,23 @@ export class SessionsService implements OnModuleInit {
         throw new BadRequestException('Досягнуто ліміт підключень до цього аукціону');
       }
 
-      // 1. СКАСОВУЄМО ТАЙМЕР ЗАКРИТТЯ, ЯКЩО ВІН Є (користувач встиг оновити сторінку)
       if (this.pendingClosures.has(session.id)) {
         clearTimeout(this.pendingClosures.get(session.id));
         this.pendingClosures.delete(session.id);
         console.log(`[SessionsService] Скасовано зупинку сесії ${session.id} (швидкий реконект)`);
       }
 
-      // 2. Тепер сесія вважається "мертвою", ТІЛЬКИ якщо isActive === false
       const wasInactive = !session.isActive;
 
-      // Атомарно збільшуємо кількість підключень
       session = await this.prisma.session.update({
         where: { id: session.id },
         data: {
-          activeConnections: { increment: 1 },
-          isActive: true
+          activeConnections: { increment: isReconnect ? 0 : 1 },
+          isActive: true,
+          users: { connect: { id: userId } },
         },
       });
 
-      // 3. Запускаємо Playwright ТІЛЬКИ якщо він був реально зупинений
       if (wasInactive) {
         this.startBrowserWorker(userId,
           session.id, auction.url, width, height, authData,
@@ -246,11 +330,11 @@ export class SessionsService implements OnModuleInit {
         },
       });
       const user = await this.prisma.user.findFirst({ where: { id: userId } });
-      const sessionLog = await this.prisma.session.findFirst({ where: { id: sessionId }, select: { auction: true, account: true } });
+      const sessionLog = await this.prisma.session.findFirst({ where: { id: session.id }, select: { auction: true, account: true } });
       if (user) {
         this.notificationService.notify(userId, "SESSION_STARTED", {
           subject: "Новий вхід до системи",
-          body: `Користувач ${user.firstName} ${user.lastName} запустив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.email}.`
+          body: `Користувач ${user.firstName} ${user.lastName} запустив сесію для аукціону ${sessionLog?.auction.title} з акаунтом ${sessionLog?.account.title}.`
         }, false)
       }
       this.startBrowserWorker(
@@ -262,7 +346,7 @@ export class SessionsService implements OnModuleInit {
     return session;
   }
 
-  private startBrowserWorker(userId:string, sessionId: string,
+  private startBrowserWorker(userId: string, sessionId: string,
     auctionUrl: string,
     width: number,
     height: number,
@@ -288,63 +372,72 @@ export class SessionsService implements OnModuleInit {
         error: (err) => console.error(`❌ Помилка відправки в RabbitMQ для сесії ${sessionId}:`, err),
       });
   }
-  async leaveSession(sessionId: string) {
+
+  async leaveSession(sessionId: string, immediate = false) {
     try {
       const currentSession = await this.prisma.session.findUnique({ where: { id: sessionId } });
-
-      // ВАЖЛИВИЙ ЗАХИСТ: Не зменшуємо лічильник, якщо сесії немає або підключень вже 0.
-      // (Без цього Prisma падала з помилкою і ламала таймер!)
       if (!currentSession || currentSession.activeConnections <= 0) return;
 
-      // Атомарне зменшення
       const updatedSession = await this.prisma.session.update({
         where: { id: sessionId },
         data: { activeConnections: { decrement: 1 } },
       });
 
-      if (updatedSession.activeConnections === 0) {
-        console.log(`[SessionsService] Всі вийшли з ${sessionId}. Очікуємо 5 сек перед зупинкою...`);
-
-        const timeout = setTimeout(async () => {
-          try {
-            const checkSession = await this.prisma.session.findUnique({ where: { id: sessionId } });
-
-            // Якщо за 5 секунд ніхто не зайшов -> вбиваємо сесію
-            if (checkSession && checkSession.activeConnections === 0) {
-              await this.prisma.session.update({
-                where: { id: sessionId },
-                data: { isActive: false, endedAt: new Date() },
-              });
-
-              await this.loggerService.logEvent({
-                sessionId,
-                eventType: SessionEventType.Other,
-                severity: 'Info',
-                message: 'Сесія завершена автоматично (немає активних підключень)',
-              });
-
-
-              // ДОДАНО .subscribe() - тепер команда реально дійде до Worker-а!
-              this.rabbitClient
-                .emit('stop_browser_session', { sessionId })
-                .subscribe({
-                  next: () => console.log(`[SessionsService] Команду зупинки відправлено в чергу`),
-                  error: (err) => console.error('Помилка відправки stop_browser_session:', err)
-                });
-
-              console.log(`[SessionsService] Сесія ${sessionId} остаточно зупинена!`);
-            }
-
-            this.pendingClosures.delete(sessionId);
-          } catch (e) {
-            console.error('Помилка під час відкладеного закриття сесії:', e);
-          }
-        }, 5000);
-
-        this.pendingClosures.set(sessionId, timeout);
+      // Якщо на цю сесію вже було заплановано закриття — прибираємо старий таймер
+      // в будь-якому разі, щоб уникнути дубльованих/осиротілих setTimeout.
+      if (this.pendingClosures.has(sessionId)) {
+        clearTimeout(this.pendingClosures.get(sessionId));
+        this.pendingClosures.delete(sessionId);
       }
+
+      if (updatedSession.activeConnections > 0) return;
+
+      if (immediate) {
+        await this.finalizeSessionClosure(sessionId);
+        return;
+      }
+
+      console.log(`[SessionsService] Всі вийшли з ${sessionId}. Очікуємо 5 сек перед зупинкою...`);
+      const timeout = setTimeout(async () => {
+        try {
+          const checkSession = await this.prisma.session.findUnique({ where: { id: sessionId } });
+          if (checkSession && checkSession.activeConnections === 0) {
+            await this.finalizeSessionClosure(sessionId);
+          }
+          this.pendingClosures.delete(sessionId);
+        } catch (e) {
+          console.error('Помилка під час відкладеного закриття сесії:', e);
+        }
+      }, 60000);
+
+      this.pendingClosures.set(sessionId, timeout);
     } catch (error) {
       console.error(`[SessionsService] Помилка у leaveSession:`, error);
     }
+  }
+
+  // НОВЕ: винесена логіка фактичного закриття сесії, спільна для
+  // явного виходу (immediate) і для grace-таймера.
+  private async finalizeSessionClosure(sessionId: string) {
+    await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { isActive: false, endedAt: new Date() },
+    });
+
+    await this.loggerService.logEvent({
+      sessionId,
+      eventType: SessionEventType.Other,
+      severity: 'Info',
+      message: 'Сесія завершена (явний вихід або відсутність підключень)',
+    });
+
+    this.rabbitClient
+      .emit('stop_browser_session', { sessionId })
+      .subscribe({
+        next: () => console.log(`[SessionsService] Команду зупинки відправлено в чергу`),
+        error: (err) => console.error('Помилка відправки stop_browser_session:', err),
+      });
+
+    console.log(`[SessionsService] Сесія ${sessionId} остаточно зупинена!`);
   }
 }

@@ -27,6 +27,7 @@ export class BrowserService {
   constructor(private readonly authRegistry: AuthStrategyRegistry, @Inject('API_CLIENT') private apiClient: ClientProxy) { }
 
   private readonly logger = new Logger(BrowserService.name);
+  private actionQueues = new Map<string, Promise<void>>();
 
   // Зберігаємо вкладки для КОЖНОГО клієнта: Map<sessionId, Map<clientId, Page>>
   private activePages = new Map<string, Map<string, Page>>();
@@ -247,15 +248,6 @@ export class BrowserService {
         if (strategy.isInteractive) {
           this.logger.log(`[BrowserService] Логін для ${url} є інтерактивним. Відкладаємо до підключення клієнта.`);
         } else {
-          this.apiClient.emit('notification.send', {
-            userId: userId,
-            typeName: NotificationEventType.SESSION_STARTED,
-            content: {
-              subject: `[BrowserService] Запуск автологіну`,
-              body: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
-            },
-            sendEmail: false,
-          });
           this.apiClient.emit('session.log.event', {
             sessionId,
             userId: userId,
@@ -273,7 +265,7 @@ export class BrowserService {
               typeName: NotificationEventType.WORKER_ERROR,
               content: {
                 subject: `[BrowserService] Помилка автологіну`,
-                body: `[BrowserService] Помилка автологіну:`, error,
+                body: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
               },
               sendEmail: false,
             });
@@ -282,7 +274,7 @@ export class BrowserService {
               userId,
               eventType: SessionEventType.SessionError,
               severity: LogSeverity.Warning,
-              message: `[BrowserService] Помилка автологіну:`, error,
+              message: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
               isIncident: false
             });
           } finally {
@@ -310,15 +302,6 @@ export class BrowserService {
       }
     }
 
-    this.apiClient.emit('notification.send', {
-      userId: userId,
-      typeName: NotificationEventType.SESSION_STARTED,
-      content: {
-        subject: `[BrowserService] Context успішно створено.`,
-        body: `[BrowserService] Context для сесії з id: ${sessionId} успішно створено.`,
-      },
-      sendEmail: false,
-    });
     this.apiClient.emit('session.log.event', {
       sessionId,
       userId: userId,
@@ -341,6 +324,112 @@ export class BrowserService {
 
     const page = await session.context.newPage();
 
+    await page.exposeFunction('logActionToNode', (actionType: string, details: string, currentUrl: string) => {
+      // ЗМІНЕНО: чіткіший, однорідний формат — одразу видно ХТО, ЩО і ДЕ зробив,
+      // без потреби вручну парсити довгий текст. currentUrl тепер завжди
+      // приходить з єдиного (не дубльованого) обробника подій в браузері.
+      const urlLabel = currentUrl || 'невідома сторінка';
+      const fullMessage = `Користувач ${userId} -> ${actionType} -> ${details} (сторінка: ${urlLabel})`;
+
+      this.apiClient.emit('session.log.event', {
+        sessionId,
+        userId,
+        eventType: SessionEventType.Other,
+        severity: LogSeverity.Info,
+        message: fullMessage,
+        isIncident: false
+      });
+      this.logger.debug(
+        `[User Action] user=${userId} session=${sessionId} action="${actionType}" url="${urlLabel}" target="${details}"`
+      );
+    });
+
+    await page.addInitScript(() => {
+      const getElementDescription = (el: HTMLElement): string => {
+        if (!el) return 'невідомий об\'єкт';
+
+        const tagName = el.tagName.toLowerCase();
+
+        const ariaLabel = el.getAttribute('aria-label');
+        if (ariaLabel) return `<${tagName}> [aria-label="${ariaLabel}"]`;
+
+        const title = el.getAttribute('title');
+        if (title) return `<${tagName}> [title="${title}"]`;
+
+        const id = el.id;
+        if (id) return `<${tagName}> [id="${id}"]`;
+
+        const name = el.getAttribute('name');
+        if (name) return `<${tagName}> [name="${name}"]`;
+
+        const placeholder = el.getAttribute('placeholder');
+        if (placeholder) return `<${tagName}> [placeholder="${placeholder}"]`;
+
+        const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (text.length > 0) {
+          return `<${tagName}> з текстом "${text.substring(0, 60)}"`;
+        }
+
+        const img = el.querySelector('img');
+        if (img && img.getAttribute('alt')) {
+          return `<${tagName}> із зображенням [alt="${img.getAttribute('alt')}"]`;
+        }
+
+        const svg = el.querySelector('svg');
+        if (svg) {
+          const svgClass = svg.getAttribute('class') || '';
+          const dataIcon = svg.getAttribute('data-icon') || svgClass.split(/\s+/)[0];
+          if (dataIcon) return `<${tagName}> з іконкою [${dataIcon}]`;
+        }
+
+        const className = (el.getAttribute('class') || '').trim().split(/\s+/).slice(0, 2).join('.');
+        const classStr = className ? `.${className}` : '';
+
+        const parent = el.parentElement;
+        if (parent) {
+          const parentTag = parent.tagName.toLowerCase();
+          const parentId = parent.id ? `#${parent.id}` : '';
+          const parentClass = (parent.getAttribute('class') || '').trim().split(/\s+/)[0];
+          const parentClassStr = parentClass ? `.${parentClass}` : '';
+
+          return `елемент <${tagName}${classStr}> (без тексту) всередині блоку <${parentTag}${parentId}${parentClassStr}>`;
+        }
+
+        return `<${tagName}${classStr}> (без ідентифікаторів)`;
+      };
+
+      document.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        if (!target) return;
+
+        const interactiveEl = target.closest('button, a, input, select, textarea, [role="button"], [tabindex]') || target;
+
+        const description = getElementDescription(interactiveEl as HTMLElement);
+        const currentUrl = window.location.href;
+
+        (window as any).logActionToNode('Клік', description, currentUrl);
+      }, true);
+
+      document.addEventListener('change', (e) => {
+        const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        if (!target) return;
+
+        const tagName = target.tagName.toLowerCase();
+        if (['input', 'textarea', 'select'].includes(tagName)) {
+          const isPassword = target.type === 'password';
+          const value = isPassword ? '********' : target.value;
+
+          const description = getElementDescription(target);
+          const currentUrl = window.location.href;
+
+          (window as any).logActionToNode(
+            'Ввід даних',
+            `Поле ${description} змінило значення на: "${value}"`,
+            currentUrl
+          );
+        }
+      }, true);
+    });
     if (!this.activePages.has(sessionId)) {
       this.activePages.set(sessionId, new Map());
     }
@@ -353,7 +442,6 @@ export class BrowserService {
       .filter(r => r.length > 0 && r !== '/');
 
     if (safeForbiddenRoutes.length > 0) {
-      // Функція нормалізації для Playwright (Node.js середовище)
       const normalizeUrlNode = (u: string) => {
         try {
           const parsed = new URL(u);
@@ -368,6 +456,15 @@ export class BrowserService {
       page.on('framenavigated', async (frame) => {
         if (frame === page.mainFrame()) {
           const currentUrl = frame.url();
+
+          this.apiClient.emit('session.log.event', {
+            sessionId,
+            userId,
+            eventType: SessionEventType.Other,
+            severity: LogSeverity.Info,
+            message: `[Browser] Перехід на сторінку: ${currentUrl}`,
+            isIncident: false
+          });
           const currentNorm = normalizeUrlNode(currentUrl);
 
           const isForbidden = normalizedForbiddenRoutes.some(fr => currentNorm.includes(fr));
@@ -391,7 +488,6 @@ export class BrowserService {
               isIncident: true
             });
             try {
-              // Відкочуємо сторінку назад або повертаємо на стартову
               const response = await page.goBack({ waitUntil: 'domcontentloaded' });
               if (!response) {
                 await page.goto(session.config.url);
@@ -407,7 +503,7 @@ export class BrowserService {
     const cdpSession = await page.context().newCDPSession(page);
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: 80,
+      quality: 90,
       maxWidth: session.config.viewport.width,
       maxHeight: session.config.viewport.height,
     });
@@ -415,17 +511,17 @@ export class BrowserService {
     let lastFrameBuffer: Buffer | null = null;
     const clientKey = `${sessionId}_${clientId}`;
 
-    cdpSession.on('Page.screencastFrame', async (frameObject) => {
-      await cdpSession.send('Page.screencastFrameAck', { sessionId: frameObject.sessionId }).catch(() => { });
+    cdpSession.on('Page.screencastFrame', (frameObject) => {
+      cdpSession.send('Page.screencastFrameAck', { sessionId: frameObject.sessionId }).catch(() => { });
       lastFrameBuffer = Buffer.from(frameObject.data, 'base64');
     });
 
+    const TARGET_FPS = 24;
     const interval = setInterval(() => {
       if (lastFrameBuffer) {
         onFrame(lastFrameBuffer);
       }
-    }, 1000 / 30);
-
+    }, 1000 / TARGET_FPS);
     this.frameIntervals.set(clientKey, interval);
     const strategy = this.authRegistry.get(session.config.url);
     if (strategy && strategy.isInteractive && !session.interactiveLoginStarted) {
@@ -435,15 +531,6 @@ export class BrowserService {
         this.logger.error(`[BrowserService] Помилка інтерактивного логіну: ${error}`);
       });
     }
-    this.apiClient.emit('notification.send', {
-      userId: userId,
-      typeName: NotificationEventType.SESSION_STARTED,
-      content: {
-        subject: `[BrowserService] Вкладку створено`,
-        body: `[BrowserService] Вкладку для користувача ${userId} створено.`,
-      },
-      sendEmail: false,
-    });
     this.apiClient.emit('session.log.event', {
       sessionId,
       userId: userId,
@@ -472,68 +559,82 @@ export class BrowserService {
   }
 
   async interact(sessionId: string, clientId: string, userId: string, action: any) {
-    // Вкладка вже правильно шукається для конкретного клієнта
     const page = this.activePages.get(sessionId)?.get(clientId);
     if (!page) return;
 
-    try {
-      switch (action.type) {
-        case 'mousemove': await page.mouse.move(action.x, action.y); break;
-        case 'mousedown': {
-          try {
-            // Отримуємо інформацію про елемент, по якому клікнули
-            const elementInfo = await page.evaluate(({ x, y }) => {
-              const el = document.elementFromPoint(x, y);
-              if (!el) return 'порожнє місце';
-
-              // Хак: часто користувачі клікають по <span> або <svg> всередині кнопки.
-              // Шукаємо найближчий "батьківський" клікабельний елемент (button або a), або залишаємо поточний
-              const target = el.closest('button, a, input, [role="button"]') || el;
-
-              const tag = target.tagName.toLowerCase();
-              const id = target.id ? `#${target.id}` : '';
-
-              // Збираємо текст, очищаємо від переносів рядків і обрізаємо до 50 символів
-              const text = (target.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 50);
-
-              if (text) {
-                return `<${tag}${id}> з текстом "${text}"`;
-              }
-
-              // Якщо тексту немає (наприклад, кнопка-іконка або інпут), беремо важливі атрибути
-              const name = target.getAttribute('name');
-              const type = target.getAttribute('type');
-              const attr = name ? `[name="${name}"]` : type ? `[type="${type}"]` : '';
-
-              return `<${tag}${id}${attr}> (без тексту)`;
-            }, { x: action.x, y: action.y });
-
-            this.apiClient.emit('session.log.event', {
-              sessionId,
-              userId: userId,
-              eventType: SessionEventType.ButtonClick,
-              severity: LogSeverity.Warning,
-              message: `[BrowserService] Користувач ${userId} натиснув на елемент ${elementInfo} .`,
-              isIncident: false
-            });
-          } catch (err) {
-          
-          }
-
-          // Виконуємо сам клік
-          const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-          await page.mouse.down({ button: downBtn });
-          break;
+    const clientKey = `${sessionId}_${clientId}`;
+    if (action.type === 'mousemove' || action.type === 'wheel') {
+      try {
+        if (action.type === 'mousemove') {
+          await page.mouse.move(action.x, action.y);
+        } else if (action.type === 'wheel') {
+          await page.mouse.wheel(action.deltaX, action.deltaY);
         }
-        case 'mouseup':
-          const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-          await page.mouse.up({ button: upBtn }); break;
-        case 'wheel': await page.mouse.wheel(action.deltaX, action.deltaY); break;
-        case 'keydown': await page.keyboard.down(action.key); break;
-        case 'keyup': await page.keyboard.up(action.key); break;
+      } catch (e) {
+        this.logger.debug(`[Browser] Помилка миттєвої дії: ${(e as Error).message}`);
       }
-    } catch (e) {
-      this.logger.debug(`[Browser] Помилка дії: ${(e as Error).message}`);
+      return;
     }
+
+    const previousAction = this.actionQueues.get(clientKey) || Promise.resolve();
+
+    const currentAction = previousAction.then(async () => {
+      try {
+        switch (action.type) {
+          case 'mousedown': {
+            const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
+
+            if (action.x !== undefined && action.y !== undefined) {
+              await page.mouse.move(action.x, action.y);
+            }
+            await page.mouse.down({ button: downBtn });
+
+            // Асинхронне логування
+            // page.evaluate(({ x, y }) => {
+            //   const el = document.elementFromPoint(x, y);
+            //   if (!el) return 'порожнє місце';
+            //   const target = el.closest('button, a, input, [role="button"]') || el;
+            //   const text = (target.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 50);
+            //   return text ? `<${target.tagName.toLowerCase()}> з текстом "${text}"` : 'елемент';
+            // }, { x: action.x, y: action.y })
+            //   .then((elementInfo) => {
+            //     this.apiClient.emit('session.log.event', {
+            //       sessionId,
+            //       userId,
+            //       eventType: SessionEventType.Other,
+            //       severity: LogSeverity.Warning,
+            //       message: `[Browser] Користувач ${userId} натиснув на елемент ${elementInfo}`,
+            //       isIncident: true
+            //     });
+            //   }).catch(() => { });
+            break;
+          }
+          case 'mouseup': {
+            const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
+
+            if (action.x !== undefined && action.y !== undefined) {
+              await page.mouse.move(action.x, action.y);
+            }
+            await page.mouse.up({ button: upBtn });
+            break;
+          }
+          case 'keydown':
+            await page.keyboard.down(action.key);
+            break;
+          case 'keyup':
+            await page.keyboard.up(action.key);
+            break;
+        }
+      } catch (e) {
+        this.logger.debug(`[Browser] Помилка черги: ${(e as Error).message}`);
+      }
+    });
+
+    this.actionQueues.set(clientKey, currentAction);
+    currentAction.finally(() => {
+      if (this.actionQueues.get(clientKey) === currentAction) {
+        this.actionQueues.delete(clientKey);
+      }
+    });
   }
 }

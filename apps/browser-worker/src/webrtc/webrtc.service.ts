@@ -10,6 +10,7 @@ export class WebrtcService {
 
   private connections = new Map<string, Map<string, RTCPeerConnection>>();
   private videoTracks = new Map<string, Map<string, MediaStreamTrack>>();
+  private ffmpegDrainState = new Map<string, boolean>();
 
   // Ключі тепер: `${sessionId}_${clientId}` для абсолютної ізоляції
   private ffmpegProcesses = new Map<string, ChildProcess>();
@@ -18,7 +19,7 @@ export class WebrtcService {
   constructor(private browserService: BrowserService) { }
 
   async handleOffer(
-    userId:string,
+    userId: string,
     sessionId: string,
     clientId: string,
     offer: any,
@@ -56,7 +57,7 @@ export class WebrtcService {
       mimeType: 'video/VP8',
       clockRate: 90000,
       payloadType: 96,
-      parameters: 'x-google-start-bitrate=1000',
+      parameters: 'x-google-start-bitrate=2500',
     });
 
     const videoTrack = new MediaStreamTrack({ kind: 'video', codec });
@@ -97,6 +98,11 @@ export class WebrtcService {
 
     const clientKey = `${sessionId}_${clientId}`;
 
+    if (this.ffmpegProcesses.has(clientKey)) {
+      this.logger.debug(`[WebRTC] Очищення старого процесу для ${clientKey}`);
+      await this.closeClientConnection(sessionId, clientId).catch(() => { });
+    }
+
     // 1. Запускаємо FFmpeg для цього конкретного клієнта
     if (!this.ffmpegProcesses.has(clientKey)) {
       this.startVideoStreaming(sessionId, clientId, viewport);
@@ -107,9 +113,19 @@ export class WebrtcService {
     this.browserService.addClientPage(userId, sessionId, clientId, (frameBuffer) => {
       const ffmpegProcess = this.ffmpegProcesses.get(clientKey);
       if (ffmpegProcess && ffmpegProcess.stdin && ffmpegProcess.stdin.writable) {
-        // Щоб FFmpeg не впав від переповнення буфера (EPIPE)
         try {
-          ffmpegProcess.stdin.write(frameBuffer);
+          // ПЕРЕВІРЯЄМО BACKPRESSURE
+          if (this.ffmpegDrainState.get(clientKey) !== false) {
+            // Записуємо кадр. Якщо write повертає false - буфер переповнений!
+            const canAcceptMore = ffmpegProcess.stdin.write(frameBuffer);
+            if (!canAcceptMore) {
+              // FFmpeg не встигає! Зупиняємо відправку нових кадрів до події 'drain'
+              this.ffmpegDrainState.set(clientKey, false);
+            }
+          } else {
+            // ПРОПУСКАЄМО КАДР (Drop frame)! 
+            // Це критично важливо. Краще відео трохи "смикнеться", ніж сервер зависне.
+          }
         } catch (e) {
           this.logger.debug(`Помилка запису кадру у FFmpeg`);
         }
@@ -124,7 +140,9 @@ export class WebrtcService {
   private startVideoStreaming(sessionId: string, clientId: string, viewport: { width: number; height: number }) {
     const port = Math.floor(Math.random() * (60000 - 50000) + 50000);
     const udpSocket = dgram.createSocket('udp4');
-    udpSocket.bind(port);
+    udpSocket.bind(port, () => {
+      udpSocket.setRecvBufferSize(4 * 1024 * 1024);
+    });
 
     const clientKey = `${sessionId}_${clientId}`;
 
@@ -140,18 +158,19 @@ export class WebrtcService {
     const ffmpegCmd = spawn('ffmpeg', [
       '-loglevel', 'error',     // Залишаємо error, щоб не спамити
       '-f', 'image2pipe',
-      '-framerate', '30',       // Вказуємо, що на вхід йде 30 FPS
+      '-framerate', '24',       // Вказуємо, що на вхід йде 30 FPS
       '-vcodec', 'mjpeg',
       '-i', '-',
       // ПОВЕРТАЄМО ФІЛЬТР ДЛЯ ПАРНИХ ПІКСЕЛІВ (ЖИТТЄВО ВАЖЛИВО ДЛЯ VP8)
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
       '-c:v', 'libvpx',
-      '-b:v', '1.5M',
+      '-b:v', '2.5M',
       '-threads', '2',
       '-deadline', 'realtime',
-      '-cpu-used', '8',
-      '-g', '30',
-      '-keyint_min', '30',
+      '-cpu-used', '5',
+      '-lag-in-frames', '0',
+      '-g', '24',
+      '-keyint_min', '24',
       '-payload_type', '96',
       '-slice-max-size', '1200',
       '-f', 'rtp',
@@ -164,6 +183,12 @@ export class WebrtcService {
     });
 
     this.ffmpegProcesses.set(clientKey, ffmpegCmd);
+    this.ffmpegDrainState.set(clientKey, true);
+
+    // Коли FFmpeg звільняє буфер, він каже Node.js "я знову готовий"
+    ffmpegCmd.stdin.on('drain', () => {
+      this.ffmpegDrainState.set(clientKey, true);
+    });
   }
 
   // Закриття підключення одного клієнта
@@ -191,6 +216,7 @@ export class WebrtcService {
     }
 
     await this.browserService.removePageForClient(sessionId, clientId).catch(() => { });
+    this.ffmpegDrainState.delete(clientKey);
   }
 
   async closeConnection(sessionId: string) {

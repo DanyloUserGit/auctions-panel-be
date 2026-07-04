@@ -9,7 +9,7 @@ export class SessionLoggerService {
 
     async logEvent(dto: CreateLogDto) {
         const user = await this.prisma.user.findFirst({ where: { id: dto.userId } });
-        if(user){
+        if(user && dto?.message && dto.message.includes(user.id)){
             dto.message = dto.message.replaceAll(user.id, `${user.firstName} ${user.lastName} (${user.email})`);
         }
         return this.prisma.sessionLog.create({

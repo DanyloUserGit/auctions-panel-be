@@ -35,7 +35,7 @@ export class ExternalDbManager implements OnModuleDestroy {
             this.logger.log(`Підключено до зовнішньої БД: ${dbName}`);
             return pool;
         } catch (error) {
-            this.logger.error(`Помилка підключення до ${dbName}: ${error.message}`);
+            this.logger.error(`Помилка підключення до ${dbName}: ${(error as any).message}`);
             throw new BadRequestException('Неможливо з’єднатися з базою даних клієнта');
         }
     }
