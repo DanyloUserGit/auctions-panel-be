@@ -1,4 +1,3 @@
-
 import { Page } from 'playwright';
 
 export interface AuthData {
@@ -8,8 +7,6 @@ export interface AuthData {
 }
 
 export interface IAuthStrategy {
-  readonly url: string; 
-  readonly isInteractive?: boolean;
-
+  readonly url: string;
   login(page: Page, authData: AuthData): Promise<void>;
 }

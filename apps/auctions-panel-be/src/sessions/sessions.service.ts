@@ -373,7 +373,7 @@ export class SessionsService implements OnModuleInit {
       });
   }
 
-  async leaveSession(sessionId: string, immediate = false) {
+  async leaveSession(sessionId: string, userId?: string, immediate = false) {
     try {
       const currentSession = await this.prisma.session.findUnique({ where: { id: sessionId } });
       if (!currentSession || currentSession.activeConnections <= 0) return;

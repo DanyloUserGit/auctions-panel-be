@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Page } from 'playwright';
+import { dismissIfPresent, safeClick, toggleMask } from '../auth-mask.util';
 import { AuthData, IAuthStrategy } from '../auth-strategy.interface';
 
 @Injectable()
@@ -10,42 +11,32 @@ export class CarmarketAyvensAuthStrategy implements IAuthStrategy {
     async login(page: Page, authData: AuthData): Promise<void> {
         if (!authData.email || !authData.password) return;
 
-        this.logger.log(`Переходимо на сторінку автологіну: ${this.url}`);
-        await page.goto(this.url, { waitUntil: 'domcontentloaded' });
+        this.logger.log(`Починаємо автологін на: ${this.url}`);
 
         try {
-            await page.waitForSelector("#onetrust-accept-btn-handler", { timeout: 5000 });
-            await page.click("#onetrust-accept-btn-handler");
-        } catch (e) {
-            this.logger.debug('Банер з куками не знайдено або вже прийнято.');
+            await toggleMask(page, true, 'Виконуємо вхід у систему...');
+
+            const cookiesClosed = await dismissIfPresent(page, '#onetrust-accept-btn-handler');
+            this.logger.debug(cookiesClosed ? 'Банер з куками закрито.' : 'Банер з куками не знайдено.');
+
+            const popupClosed = await dismissIfPresent(page, '.ab_widget_container_popin-image_close_button');
+            this.logger.debug(popupClosed ? 'Промо-попап закрито.' : 'Промо-попап не знайдено.');
+
+            await page.waitForSelector('#btn_signIn', { state: 'visible', timeout: 10000 });
+            await safeClick(page, '#btn_signIn');
+
+            await page.waitForSelector('#userName', { state: 'visible', timeout: 15000 });
+            await page.fill('#userName', authData.email);
+            await page.fill('#password', authData.password);
+
+            await safeClick(page, 'button[type="submit"]');
+
+            await page.waitForSelector('#userName', { state: 'hidden', timeout: 15000 });
+            this.logger.log('Успішний логін!');
+        } catch (error) {
+            this.logger.error('Помилка під час автологіну:', error);
+        } finally {
+            await toggleMask(page, false).catch(() => { });
         }
-
-        try {
-            const popupCloseSelector = '.ab_widget_container_popin-image_close_button';
-            await page.waitForSelector(popupCloseSelector, { state: 'visible', timeout: 5000 });
-            await page.click(popupCloseSelector);
-            this.logger.debug('Віджет/попап успішно закрито.');
-        } catch (e) {
-            this.logger.debug('Віджет/попап не знайдено або не з\'явився.');
-        }
-
-        await page.waitForSelector("#btn_signIn", { state: 'visible', timeout: 5000 });
-        this.logger.debug('Знаходимо кнопку входу та клікаємо її.');
-        await page.click("#btn_signIn");
-
-        await page.waitForSelector('#userName', { state: 'visible', timeout: 15000 });
-        await page.fill('#userName', authData.email);
-        this.logger.debug('Заповнюємо поле email.');
-
-
-        await page.fill('#password', authData.password);
-        this.logger.debug('Заповнюємо поле пароля.');
-
-        await page.click('button[type="submit"]');
-        this.logger.debug('Натискаємо кнопку входу.');
-
-        await page.waitForSelector('#userName', { state: 'hidden', timeout: 15000 });
-
-        this.logger.log('Успішний логін!');
     }
 }

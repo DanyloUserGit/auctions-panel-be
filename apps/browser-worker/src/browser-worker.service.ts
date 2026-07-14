@@ -81,7 +81,30 @@ export class BrowserService {
         '--disable-gpu',
       ],
     });
+    context.on('page', async (newPage) => {
+      try {
+        // Сторінки, які ми самі створюємо через context.newPage() (addClientPage),
+        // НЕ мають opener'а. Обробляти треба лише справжні popup-вкладки
+        // (target="_blank", window.open()), які завжди мають opener.
+        const opener = await newPage.opener();
+        if (!opener) return;
 
+        await newPage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => { });
+        const targetUrl = newPage.url();
+        await newPage.close();
+
+        const clientPages = this.activePages.get(sessionId);
+        if (clientPages) {
+          for (const page of clientPages.values()) {
+            if (!page.isClosed()) {
+              await page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => { });
+            }
+          }
+        }
+      } catch (e) {
+        this.logger.error(`[BrowserService] Помилка обробки popup-вкладки: ${e}`);
+      }
+    });
     // --- 1. ПРАВИЛА МАРШРУТИЗАЦІЇ (РОУТИ) ---
 
     // 👇 ДОДАНО: Очищаємо масив від небезпечних значень (порожніх рядків та просто '/')
@@ -195,7 +218,12 @@ export class BrowserService {
           return originalReplaceState.apply(this, args);
         };
       }, safeForbiddenRoutes);
-
+      await context.addInitScript(() => {
+        window.addEventListener('click', (e) => {
+          const link = (e.target as HTMLElement).closest('a[target="_blank"]');
+          if (link) link.removeAttribute('target');
+        }, true);
+      });
     }
     // --- КІНЕЦЬ ПРАВИЛ ---
     // --- 2. БЛОКУВАННЯ СЕЛЕКТОРІВ ---
@@ -241,63 +269,19 @@ export class BrowserService {
       config: { url, viewport, allowedRoutes, forbiddenSelectors, forbiddenRoutes, authData }
     });
 
-    // Логіка автологіну
     if (url) {
       const strategy = this.authRegistry.get(url);
       if (strategy) {
-        if (strategy.isInteractive) {
-          this.logger.log(`[BrowserService] Логін для ${url} є інтерактивним. Відкладаємо до підключення клієнта.`);
-        } else {
-          this.apiClient.emit('session.log.event', {
-            sessionId,
-            userId: userId,
-            eventType: SessionEventType.Other,
-            severity: LogSeverity.Info,
-            message: `[BrowserService] Запуск автологіну через: ${strategy.url}`,
-            isIncident: false
-          });
-          const loginPage = await context.newPage();
-          try {
-            await strategy.login(loginPage, authData);
-          } catch (error) {
-            this.apiClient.emit('notification.send', {
-              userId: userId,
-              typeName: NotificationEventType.WORKER_ERROR,
-              content: {
-                subject: `[BrowserService] Помилка автологіну`,
-                body: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
-              },
-              sendEmail: false,
-            });
-            this.apiClient.emit('session.log.event', {
-              sessionId,
-              userId,
-              eventType: SessionEventType.SessionError,
-              severity: LogSeverity.Warning,
-              message: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
-              isIncident: false
-            });
-          } finally {
-            await loginPage.close();
-          }
-        }
+        this.logger.log(`[BrowserService] Стратегію логіну для ${url} знайдено. Виконається після підключення клієнта.`);
       } else {
         this.apiClient.emit('notification.send', {
-          userId: userId,
-          typeName: NotificationEventType.WORKER_ERROR,
-          content: {
-            subject: `[BrowserService] Стратегія логіну`,
-            body: `[BrowserService] Стратегію логіну '${url}' не знайдено!`,
-          },
+          userId, typeName: NotificationEventType.WORKER_ERROR,
+          content: { subject: `[BrowserService] Стратегія логіну`, body: `Стратегію логіну '${url}' не знайдено!` },
           sendEmail: false,
         });
         this.apiClient.emit('session.log.event', {
-          sessionId,
-          userId,
-          eventType: SessionEventType.SessionError,
-          severity: LogSeverity.Warning,
-          message: `[BrowserService] Стратегію логіну '${url}' не знайдено!`,
-          isIncident: false
+          sessionId, userId, eventType: SessionEventType.SessionError,
+          severity: LogSeverity.Warning, message: `Стратегію логіну '${url}' не знайдено!`, isIncident: false,
         });
       }
     }
@@ -524,11 +508,18 @@ export class BrowserService {
     }, 1000 / TARGET_FPS);
     this.frameIntervals.set(clientKey, interval);
     const strategy = this.authRegistry.get(session.config.url);
-    if (strategy && strategy.isInteractive && !session.interactiveLoginStarted) {
+    if (strategy && !session.interactiveLoginStarted) {
       session.interactiveLoginStarted = true;
 
       strategy.login(page, session.config.authData).catch(error => {
-        this.logger.error(`[BrowserService] Помилка інтерактивного логіну: ${error}`);
+        this.logger.error(`[BrowserService] Помилка автологіну: ${error}`);
+        this.apiClient.emit('session.log.event', {
+          sessionId, userId,
+          eventType: SessionEventType.SessionError,
+          severity: LogSeverity.Warning,
+          message: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
+          isIncident: false
+        });
       });
     }
     this.apiClient.emit('session.log.event', {
