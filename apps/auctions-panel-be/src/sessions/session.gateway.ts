@@ -150,21 +150,19 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
   @SubscribeMessage('leave_auction')
-  async handleLeaveAuction(@ConnectedSocket() client: Socket, @MessageBody() payload: { sessionId: string }) {
-    const sessionId = payload?.sessionId;
+  async handleLeaveAuction(@ConnectedSocket() client: Socket, @MessageBody() payload: { sessionId: string, userId: string }) {
+    const { sessionId, userId } = payload;
     if (!sessionId) return;
 
     client.leave(sessionId);
 
-    // Явний вихід — прибираємо будь-який відкладений тихий-дисконект таймер
-    // для цієї сесії, щоб він пізніше не "воскресив" її своєю логікою.
     const pending = this.disconnectTimeouts.get(sessionId);
     if (pending) {
       clearTimeout(pending.timeout);
       this.disconnectTimeouts.delete(sessionId);
     }
 
-    await this.sessionService.leaveSession(sessionId, true); // immediate = true
+    await this.sessionService.leaveSession(sessionId, userId, true); // immediate = true
 
     this.rabbitClient
       .emit('webrtc_client_disconnect', { sessionId, clientId: client.id })

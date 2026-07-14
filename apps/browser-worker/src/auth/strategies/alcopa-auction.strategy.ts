@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Page } from 'playwright';
+import { toggleMask } from '../auth-mask.util';
 import { AuthData, IAuthStrategy } from '../auth-strategy.interface';
 
 @Injectable()
@@ -16,10 +17,6 @@ export class AlcopaStrategy implements IAuthStrategy {
         try {
             this.logger.log('Очікуємо, поки користувач пройде капчу і натисне Confirm...');
 
-
-            // 2. Чекаємо на навігацію, яку спровокував клік.
-            // waitUntil: 'domcontentloaded' гарантує, що нова сторінка достатньо завантажилась 
-            // для безпечної ін'єкції нашої маски у body.
             await page.waitForNavigation({
                 waitUntil: 'domcontentloaded',
                 timeout: 30000
@@ -29,7 +26,7 @@ export class AlcopaStrategy implements IAuthStrategy {
 
             // 3. Сторінка оновилася. Включаємо блюр.
             this.logger.log('Включаємо затінення екрану...');
-            await this.toggleMask(page, true, 'Перевірка капчі... Виконуємо вхід у систему.');
+            await toggleMask(page, true, 'Перевірка капчі... Виконуємо вхід у систему.');
 
             // ДАЄМО САЙТУ ЧАС ІНІЦІАЛІЗУВАТИ СКРИПТИ (jQuery/Bootstrap)
             // Чекаємо, поки мережа трохи заспокоїться, або максимум 5 секунд
@@ -106,67 +103,14 @@ export class AlcopaStrategy implements IAuthStrategy {
             await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => { });
 
             // Змінюємо текст блюру на успішний
-            await this.toggleMask(page, true, 'Вхід успішний! Завантажуємо дані аукціону...');
+            await toggleMask(page, true, 'Вхід успішний! Завантажуємо дані аукціону...');
             this.logger.log('Інтерактивний логін успішно завершено!');
         } catch (error) {
             this.logger.error('Помилка під час інтерактивного логіну:', error);
-            await this.toggleMask(page, false);
+            await toggleMask(page, false);
         } finally {
-            setTimeout(async () => await this.toggleMask(page, false).catch(() => { }), 3000);
+            setTimeout(async () => await toggleMask(page, false).catch(() => { }), 3000);
         }
     }
 
-    private async toggleMask(page: Page, show: boolean, message: string = 'Завантаження...', retries = 0): Promise<void> {
-        try {
-            await page.evaluate(({ show, message }) => {
-                let overlay = document.getElementById('pw-auth-overlay');
-
-                if (show) {
-                    if (!overlay) {
-                        overlay = document.createElement('div');
-                        overlay.id = 'pw-auth-overlay';
-                        Object.assign(overlay.style, {
-                            position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(12px)',
-                            color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '28px', fontFamily: 'sans-serif', zIndex: '2147483647',
-                            pointerEvents: 'all'
-                        });
-                        document.body.appendChild(overlay);
-                    }
-                    overlay.innerText = message;
-                    overlay.style.display = 'flex';
-                } else if (overlay) {
-                    overlay.style.display = 'none';
-                }
-            }, { show, message });
-        } catch (error: any) {
-            // Перехоплюємо помилку навігації Playwright
-            if (error.message.includes('Execution context was destroyed') || error.message.includes('Target page, context or browser has been closed')) {
-
-                // Якщо ми хотіли зняти блюр, а сторінка перевантажилась — блюр вже зник сам по собі
-                if (!show) return;
-
-                // Запобіжник від нескінченного циклу (максимум 3 спроби)
-                if (retries >= 3) {
-                    this.logger.error('Не вдалося накласти блюр після кількох спроб перезавантаження.');
-                    return;
-                }
-
-                this.logger.warn(`Сторінка перезавантажується після капчі. Очікуємо нову сторінку... (спроба ${retries + 1})`);
-
-                // Чекаємо, поки нова сторінка хоча б базово завантажиться
-                await page.waitForLoadState('domcontentloaded').catch(() => { });
-
-                // Даємо 500мс для стабілізації DOM
-                await new Promise(resolve => setTimeout(resolve, 500));
-
-                // Пробуємо накласти блюр ще раз (рекурсивно)
-                await this.toggleMask(page, show, message, retries + 1);
-            } else {
-                // Якщо це якась інша помилка — прокидаємо її далі
-                throw error;
-            }
-        }
-    }
 }
