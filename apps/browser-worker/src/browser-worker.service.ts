@@ -1,4 +1,3 @@
-// apps/browser-worker/src/browser/browser.service.ts
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import * as path from 'path';
@@ -29,7 +28,6 @@ export class BrowserService {
   private readonly logger = new Logger(BrowserService.name);
   private actionQueues = new Map<string, Promise<void>>();
 
-  // Зберігаємо вкладки для КОЖНОГО клієнта: Map<sessionId, Map<clientId, Page>>
   private activePages = new Map<string, Map<string, Page>>();
   private sessions = new Map<string, ActiveSession>();
 
@@ -44,7 +42,17 @@ export class BrowserService {
       const clientPages = this.activePages.get(sessionId);
       if (clientPages) {
         for (const [clientId, page] of clientPages.entries()) {
-          if (!page.isClosed()) await page.close();
+          try {
+            if (!page.isClosed()) await page.close();
+          } catch (e) {
+            this.logger.debug(`[BrowserService] Помилка закриття вкладки клієнта ${clientId} при зупинці сесії ${sessionId}: ${e}`);
+          }
+          const clientKey = `${sessionId}_${clientId}`;
+          const interval = this.frameIntervals.get(clientKey);
+          if (interval) {
+            clearInterval(interval);
+            this.frameIntervals.delete(clientKey);
+          }
         }
       }
       await session.context.close();
@@ -69,23 +77,42 @@ export class BrowserService {
     const userDataDir = path.join('/tmp/playwright_sessions', sessionId);
     const userAgent = new UserAgent();
 
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: true,
-      viewport,
-      userAgent: userAgent.toString(),
-      ignoreHTTPSErrors: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
+    let context: BrowserContext;
+    try {
+      context = await chromium.launchPersistentContext(userDataDir, {
+        headless: true,
+        viewport,
+        userAgent: userAgent.toString(),
+        ignoreHTTPSErrors: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      });
+    } catch (error) {
+      this.logger.error(`[BrowserService] Не вдалось запустити браузер для сесії ${sessionId}:`, error);
+      this.apiClient.emit('notification.send', {
+        userId,
+        typeName: NotificationEventType.WORKER_ERROR,
+        content: {
+          subject: `[BrowserService] Помилка запуску браузера`,
+          body: `Не вдалось запустити сесію ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        sendEmail: true,
+      });
+      this.apiClient.emit('session.log.event', {
+        sessionId, userId,
+        eventType: SessionEventType.SessionError,
+        severity: LogSeverity.Critical,
+        message: `[BrowserService] Не вдалось запустити браузер: ${error instanceof Error ? error.message : String(error)}`,
+        isIncident: true,
+      });
+      throw error;
+    }
     context.on('page', async (newPage) => {
       try {
-        // Сторінки, які ми самі створюємо через context.newPage() (addClientPage),
-        // НЕ мають opener'а. Обробляти треба лише справжні popup-вкладки
-        // (target="_blank", window.open()), які завжди мають opener.
         const opener = await newPage.opener();
         if (!opener) return;
 
@@ -115,49 +142,51 @@ export class BrowserService {
 
     // (А) Блокування на рівні мережі (для повних перезавантажень сторінки)
     await context.route('**/*', (route) => {
-      const request = route.request();
+      try {
+        const request = route.request();
 
-      if (request.isNavigationRequest()) {
-        const reqUrl = request.url();
-        // Використовуємо ОЧИЩЕНИЙ масив safeForbiddenRoutes
-        const isForbidden = safeForbiddenRoutes.some(fr => reqUrl.includes(fr));
+        if (request.isNavigationRequest()) {
+          const reqUrl = request.url();
+          // Використовуємо ОЧИЩЕНИЙ масив safeForbiddenRoutes
+          const isForbidden = safeForbiddenRoutes.some(fr => reqUrl.includes(fr));
 
-        if (isForbidden) {
-          this.apiClient.emit('notification.send', {
-            userId: userId,
-            typeName: NotificationEventType.WORKER_ERROR,
-            content: {
-              subject: `[Browser] Блокування переходу`,
-              body: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
-            },
-            sendEmail: true,
-          });
-          this.apiClient.emit('session.log.event', {
-            sessionId,
-            userId,
-            eventType: SessionEventType.ForbiddenAction,
-            severity: LogSeverity.Critical,
-            message: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
-            isIncident: true
-          });
-          return route.abort('accessdenied');
+          if (isForbidden) {
+            this.apiClient.emit('notification.send', {
+              userId: userId,
+              typeName: NotificationEventType.WORKER_ERROR,
+              content: {
+                subject: `[Browser] Блокування переходу`,
+                body: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
+              },
+              sendEmail: true,
+            });
+            this.apiClient.emit('session.log.event', {
+              sessionId,
+              userId,
+              eventType: SessionEventType.ForbiddenAction,
+              severity: LogSeverity.Critical,
+              message: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
+              isIncident: true
+            });
+            return route.abort('accessdenied').catch(() => { });
+          }
         }
+        route.continue().catch(() => { }); 
+      } catch (e) {
+        this.logger.debug(`[BrowserService] Помилка обробки маршруту: ${e}`);
+        route.continue().catch(() => { });
       }
-      route.continue(); // Обов'язково пропускаємо всі інші запити
     });
     this.logger.warn("safeForbiddenRoutes: ", safeForbiddenRoutes)
-    // (Б) Блокування на рівні SPA (для React/Angular/Vue роутерів)
     if (safeForbiddenRoutes.length > 0) {
       await context.addInitScript((routes: string[]) => {
-        // Універсальна нормалізація URL (відкидаємо http://, кінцеві слеші та query параметри)
         const normalizeUrl = (u: string) => {
           if (!u) return '';
           try {
-            // window.location.origin перетворює відносні шляхи SPA (/lots) на абсолютні
             const parsed = new URL(u, window.location.origin);
             return (parsed.hostname + parsed.pathname).replace(/\/+$/, '');
           } catch (e) {
-            return u.replace(/\/+$/, ''); // Fallback
+            return u.replace(/\/+$/, ''); 
           }
         };
 
@@ -166,13 +195,9 @@ export class BrowserService {
         const isForbiddenUrl = (targetUrl: string) => {
           if (!targetUrl) return false;
           const targetNorm = normalizeUrl(targetUrl);
-          // Тепер порівнюємо чисті шляхи, наприклад:
-          // targetNorm: "carmarket.ayvens.com/en-es/lots"
-          // normalizedRoutes: ["carmarket.ayvens.com/en-es/lots"]
           return normalizedRoutes.some(r => targetNorm.includes(r));
         };
 
-        // 1. Перехоплюємо кліки на рівні window
         window.addEventListener('click', (e) => {
           const link = (e.target as HTMLElement).closest('a');
           if (link && link.href) {
@@ -203,7 +228,6 @@ export class BrowserService {
           }
         }, true);
 
-        // 2. Перехоплюємо History API
         const originalPushState = history.pushState;
         history.pushState = function (...args) {
           const url = args[2];
@@ -225,35 +249,27 @@ export class BrowserService {
         }, true);
       });
     }
-    // --- КІНЕЦЬ ПРАВИЛ ---
-    // --- 2. БЛОКУВАННЯ СЕЛЕКТОРІВ ---
     if (forbiddenSelectors && forbiddenSelectors.length > 0) {
       await context.addInitScript((selectors: string[]) => {
-        // Функція для блокування події
         const blockEvent = (e: Event) => {
           const target = e.target as HTMLElement;
           if (!target) return;
 
           try {
-            // Перевіряємо, чи сам елемент або його батьки підпадають під заборонений селектор
             const isForbidden = selectors.some(sel => target.matches(sel) || target.closest(sel));
             if (isForbidden) {
-              e.stopPropagation(); // Зупиняємо поширення події
-              e.preventDefault();  // Скасовуємо стандартну дію
+              e.stopPropagation(); 
+              e.preventDefault();  
             }
-          } catch (err) {
-            // Ігноруємо помилки синтаксису некоректних селекторів
-          }
+          } catch (err) {}
         };
 
-        // Перехоплюємо події на етапі capture (найпершими), щоб сайт не встиг на них відреагувати
         window.addEventListener('mousedown', blockEvent, true);
         window.addEventListener('mouseup', blockEvent, true);
         window.addEventListener('click', blockEvent, true);
         window.addEventListener('keydown', blockEvent, true);
         window.addEventListener('keyup', blockEvent, true);
 
-        // Візуально робимо елементи "неактивними" (напівпрозорі, курсор заборони, і зняття pointer-events)
         window.addEventListener('DOMContentLoaded', () => {
           const style = document.createElement('style');
           style.textContent = selectors.map(s => `${s} { opacity: 0.6 !important; cursor: not-allowed !important; pointer-events: none !important; }`).join('\n');
@@ -261,9 +277,7 @@ export class BrowserService {
         });
       }, forbiddenSelectors);
     }
-    // --- КІНЕЦЬ ПРАВИЛ ---
 
-    // Зберігаємо сесію (додано forbiddenRoutes)
     this.sessions.set(sessionId, {
       context,
       config: { url, viewport, allowedRoutes, forbiddenSelectors, forbiddenRoutes, authData }
@@ -306,12 +320,16 @@ export class BrowserService {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
 
-    const page = await session.context.newPage();
+    let page: Page;
+    try {
+      page = await session.context.newPage();
+    } catch (error) {
+      this.logger.error(`[BrowserService] Не вдалось створити вкладку для клієнта ${clientId}:`, error);
+      throw error;
+    }
 
-    await page.exposeFunction('logActionToNode', (actionType: string, details: string, currentUrl: string) => {
-      // ЗМІНЕНО: чіткіший, однорідний формат — одразу видно ХТО, ЩО і ДЕ зробив,
-      // без потреби вручну парсити довгий текст. currentUrl тепер завжди
-      // приходить з єдиного (не дубльованого) обробника подій в браузері.
+    try {
+      await page.exposeFunction('logActionToNode', (actionType: string, details: string, currentUrl: string) => {
       const urlLabel = currentUrl || 'невідома сторінка';
       const fullMessage = `Користувач ${userId} -> ${actionType} -> ${details} (сторінка: ${urlLabel})`;
 
@@ -419,7 +437,12 @@ export class BrowserService {
     }
     this.activePages.get(sessionId)!.set(clientId, page);
 
-    await page.goto(session.config.url, { waitUntil: 'domcontentloaded' });
+    try {
+      await page.goto(session.config.url, { waitUntil: 'domcontentloaded' });
+    } catch (error) {
+      this.logger.error(`[BrowserService] Не вдалось відкрити ${session.config.url} для клієнта ${clientId}:`, error);
+      throw error;
+    }
 
     const safeForbiddenRoutes = (session.config.forbiddenRoutes || [])
       .map(r => r.trim())
@@ -484,13 +507,19 @@ export class BrowserService {
       });
     }
 
-    const cdpSession = await page.context().newCDPSession(page);
-    await cdpSession.send('Page.startScreencast', {
-      format: 'jpeg',
-      quality: 90,
-      maxWidth: session.config.viewport.width,
-      maxHeight: session.config.viewport.height,
-    });
+    let cdpSession;
+    try {
+      cdpSession = await page.context().newCDPSession(page);
+      await cdpSession.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: 90,
+        maxWidth: session.config.viewport.width,
+        maxHeight: session.config.viewport.height,
+      });
+    } catch (error) {
+      this.logger.error(`[BrowserService] Не вдалось запустити CDP screencast для клієнта ${clientId}:`, error);
+      throw error;
+    }
 
     let lastFrameBuffer: Buffer | null = null;
     const clientKey = `${sessionId}_${clientId}`;
@@ -531,6 +560,32 @@ export class BrowserService {
       isIncident: false
     });
     return page;
+    } catch (error) {
+      this.logger.error(`[BrowserService] Помилка налаштування вкладки для клієнта ${clientId}:`, error);
+
+      const clientKeyOnFail = `${sessionId}_${clientId}`;
+      const intervalOnFail = this.frameIntervals.get(clientKeyOnFail);
+      if (intervalOnFail) {
+        clearInterval(intervalOnFail);
+        this.frameIntervals.delete(clientKeyOnFail);
+      }
+
+      this.activePages.get(sessionId)?.delete(clientId);
+
+      if (!page.isClosed()) {
+        await page.close().catch(() => { });
+      }
+
+      this.apiClient.emit('session.log.event', {
+        sessionId, userId,
+        eventType: SessionEventType.SessionError,
+        severity: LogSeverity.Critical,
+        message: `[BrowserService] Помилка налаштування вкладки: ${error instanceof Error ? error.message : String(error)}`,
+        isIncident: true,
+      });
+
+      throw error;
+    }
   }
 
   async removePageForClient(sessionId: string, clientId: string) {
@@ -543,9 +598,16 @@ export class BrowserService {
     }
 
     const page = this.activePages.get(sessionId)?.get(clientId);
-    if (page && !page.isClosed()) {
-      await page.close();
-      this.activePages.get(sessionId)?.delete(clientId);
+    if (page) {
+      try {
+        if (!page.isClosed()) {
+          await page.close();
+        }
+      } catch (e) {
+        this.logger.debug(`[BrowserService] Помилка закриття вкладки ${clientKey}: ${e}`);
+      } finally {
+        this.activePages.get(sessionId)?.delete(clientId);
+      }
     }
   }
 
@@ -580,24 +642,6 @@ export class BrowserService {
             }
             await page.mouse.down({ button: downBtn });
 
-            // Асинхронне логування
-            // page.evaluate(({ x, y }) => {
-            //   const el = document.elementFromPoint(x, y);
-            //   if (!el) return 'порожнє місце';
-            //   const target = el.closest('button, a, input, [role="button"]') || el;
-            //   const text = (target.textContent || '').replace(/\s+/g, ' ').trim().substring(0, 50);
-            //   return text ? `<${target.tagName.toLowerCase()}> з текстом "${text}"` : 'елемент';
-            // }, { x: action.x, y: action.y })
-            //   .then((elementInfo) => {
-            //     this.apiClient.emit('session.log.event', {
-            //       sessionId,
-            //       userId,
-            //       eventType: SessionEventType.Other,
-            //       severity: LogSeverity.Warning,
-            //       message: `[Browser] Користувач ${userId} натиснув на елемент ${elementInfo}`,
-            //       isIncident: true
-            //     });
-            //   }).catch(() => { });
             break;
           }
           case 'mouseup': {
@@ -615,6 +659,25 @@ export class BrowserService {
           case 'keyup':
             await page.keyboard.up(action.key);
             break;
+          case 'navigate_back': {
+            try {
+              const response = await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 });
+              if (!response) {
+                this.logger.debug(`[Browser] goBack: історія навігації порожня для ${clientKey}`);
+              }
+            } catch (e) {
+              this.logger.debug(`[Browser] Помилка goBack для ${clientKey}: ${(e as Error).message}`);
+            }
+            break;
+          }
+          case 'navigate_forward': {
+            try {
+              await page.goForward({ waitUntil: 'domcontentloaded', timeout: 10000 });
+            } catch (e) {
+              this.logger.debug(`[Browser] Помилка goForward для ${clientKey}: ${(e as Error).message}`);
+            }
+            break;
+          }
         }
       } catch (e) {
         this.logger.debug(`[Browser] Помилка черги: ${(e as Error).message}`);

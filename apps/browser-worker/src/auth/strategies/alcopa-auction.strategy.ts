@@ -17,14 +17,23 @@ export class AlcopaStrategy implements IAuthStrategy {
         try {
             this.logger.log('Очікуємо, поки користувач пройде капчу і натисне Confirm...');
 
-            await page.waitForNavigation({
-                waitUntil: 'domcontentloaded',
-                timeout: 30000
-            }).catch((err) => {
-                this.logger.warn('Очікування навігації завершилось таймаутом або це був AJAX запит. Продовжуємо...');
-            });
+            // ВАЖЛИВО: не покладаємось на один жорсткий таймаут навігації.
+            // Замість того щоб "наосліп" вважати капчу пройденою через 30с
+            // і одразу закривати екран маскою (через що користувач, який ще
+            // не встиг пройти капчу, більше її не бачить і не може завершити),
+            // активно перевіряємо реальний стан сторінки й даємо користувачу
+            // набагато більше часу, поки екран лишається відкритим.
+            const captchaPassed = await this.waitForCaptchaCompletion(page, 5 * 60 * 1000);
 
-            this.logger.log('Включаємо затінення екрану...');
+            if (!captchaPassed) {
+                this.logger.warn(
+                    `Користувач не пройшов капчу протягом відведеного часу (${this.url}). ` +
+                    'Перериваємо інтерактивний логін без блокування екрану.'
+                );
+                return;
+            }
+
+            this.logger.log('Капчу пройдено, вмикаємо затінення екрану і продовжуємо автологін...');
             await toggleMask(page, true, 'Перевірка капчі... Виконуємо вхід у систему.');
 
             await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { });
@@ -89,6 +98,45 @@ export class AlcopaStrategy implements IAuthStrategy {
         } finally {
             setTimeout(async () => await toggleMask(page, false).catch(() => { }), 3000);
         }
+    }
+
+    /**
+     * Активно чекає, поки користувач реально пройде капчу, замість того щоб
+     * покладатись на один жорсткий таймаут навігації.
+     *
+     * Ознака успіху: на сторінці з'явилась і стала видимою кнопка відкриття
+     * форми логіну ("Mon compte") — тобто головна сторінка сайту повністю
+     * завантажилась після капчі. Поки цієї ознаки немає — екран НЕ маскується,
+     * щоб користувач і далі бачив та міг пройти капчу, навіть якщо відволікся.
+     *
+     * @returns true, якщо ознаку успіху знайдено в межах maxWaitMs; false, якщо час вичерпано.
+     */
+    private async waitForCaptchaCompletion(page: Page, maxWaitMs: number): Promise<boolean> {
+        const pollIntervalMs = 2000;
+        const deadline = Date.now() + maxWaitMs;
+        const successLocator = page.locator('btn[data-target="#modal-login-form"]:visible').first();
+
+        let lastLoggedSecond = -1;
+
+        while (Date.now() < deadline) {
+            try {
+                if (await successLocator.isVisible()) {
+                    return true;
+                }
+            } catch (e) {
+                // Елемент ще не в DOM або сторінка перерендерюється — це нормально під час капчі.
+            }
+
+            const secondsLeft = Math.round((deadline - Date.now()) / 1000);
+            if (secondsLeft % 30 === 0 && secondsLeft !== lastLoggedSecond) {
+                lastLoggedSecond = secondsLeft;
+                this.logger.log(`Все ще очікуємо проходження капчі користувачем... (${secondsLeft}с залишилось)`);
+            }
+
+            await page.waitForTimeout(pollIntervalMs);
+        }
+
+        return false;
     }
 
 }
