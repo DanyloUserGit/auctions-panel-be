@@ -25,6 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.usersService.findOne(payload.id);
 
     if (!user) throw new UnauthorizedException();
+    if (user.isBlocked) throw new UnauthorizedException('Користувача заблоковано');
 
     return user;
   }

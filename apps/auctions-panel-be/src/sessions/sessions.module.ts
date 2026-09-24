@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AccessModule } from '../access/access.module';
+import { JwtModule } from '@nestjs/jwt';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SessionsController } from './sessions.controller';
 import { PrismaModule } from '../prisma/prisma.module';
@@ -23,7 +25,10 @@ import { NotificationModule } from '../notification/notification.module';
         },
       },
     ]),
+    // Секрет передається явно у SessionGateway (JWT_SECRET), як і в JwtStrategy.
+    JwtModule.register({}),
     PrismaModule,
+    AccessModule,
     SessionLoggerModule,
     NotificationModule
   ],

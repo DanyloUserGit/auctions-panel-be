@@ -1,5 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
+import { Roles } from '@prisma/client';
+import { RolesGuard } from '../auth/roles.guard';
+import { RolesDecorator } from '../decorators/roles.decorator';
 import { AuctionGroupsService } from './auction-groups.service';
 import { AddAuctionSchema, AddAuctionSwaggerDto, type AddAuctionDto } from './dto/add-auction.dto';
 import {
@@ -18,63 +21,45 @@ export class AuctionGroupsController {
 
   @Get('search')
   search(@Query('q') query: string, @Req() req) {
-    return this.auctionGroupsService.search({
-      user: req.user,
-      query,
-    });
+    return this.auctionGroupsService.search(req.user, query);
   }
 
-  @Post(':id/block-group')
-  blockGroup(@Param('id') groupId: string,) {
-    return this.auctionGroupsService.blockGroup(groupId);
-  }
-
-  @Post(':id/unblock-group')
-  unBlockGroup(@Param('id') groupId: string,) {
-    return this.auctionGroupsService.unBlockGroup(groupId);
-  }
-
-
-  @Post(':id/grant-account-access')
-  grantAccountAccess(@Param('id') groupId: string, @Body() body: { userId: string }) {
-    return this.auctionGroupsService.grantAccountAccess(groupId, body.userId);
-  }
-
-  @Delete(':id/revoke-account-access/:userId')
-  revokeAccountAccess(@Param('id') groupId: string, @Param('userId') userId: string) {
-    return this.auctionGroupsService.revokeAccountAccess(groupId, userId);
-  }
-
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
   @Post(':id/add-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
-    description: 'User successfully created',
+    description: 'Auction attached to group',
     schema: {
       allOf: [{ $ref: getSchemaPath(AddAuctionSwaggerDto) }],
     },
   })
-  addUser(@Param('id') auctionId: string, @Body() body: AddAuctionDto) {
+  addAuction(@Param('id') groupId: string, @Body() body: AddAuctionDto) {
     const data = AddAuctionSchema.parse(body);
-    return this.auctionGroupsService.addAuction(auctionId, data.auctionId);
+    return this.auctionGroupsService.addAuction(groupId, data.auctionId);
   }
-  @Delete(':id/remove-user')
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Delete(':id/remove-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
-    description: 'User successfully created',
+    description: 'Auction detached from group',
     schema: {
       allOf: [{ $ref: getSchemaPath(AddAuctionSwaggerDto) }],
     },
   })
-  removeUser(@Param('id') auctionId: string, @Body() body: AddAuctionDto) {
+  removeAuction(@Param('id') groupId: string, @Body() body: AddAuctionDto) {
     const data = AddAuctionSchema.parse(body);
-    return this.auctionGroupsService.removeAuction(auctionId, data.auctionId);
+    return this.auctionGroupsService.removeAuction(groupId, data.auctionId);
   }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
   @Post()
-  // 
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
-    description: 'User successfully created',
+    description: 'Auction group successfully created',
     schema: {
       allOf: [
         {
@@ -89,7 +74,7 @@ export class AuctionGroupsController {
   })
   create(@Body() createAuctionGroupDto: CreateAuctionGroupDto, @Req() req) {
     const data = CreateAuctionGroupSchema.parse(createAuctionGroupDto);
-    return this.auctionGroupsService.create({ ...data }, req.user);
+    return this.auctionGroupsService.create(data, req.user);
   }
 
   @Get()
@@ -102,10 +87,12 @@ export class AuctionGroupsController {
     return this.auctionGroupsService.findOne(id, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
   @Patch(':id')
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
-    description: 'User successfully created',
+    description: 'Auction group successfully updated',
     schema: {
       allOf: [
         {
@@ -120,10 +107,11 @@ export class AuctionGroupsController {
   })
   update(@Param('id') id: string, @Body() updateAuctionGroupDto: UpdateAuctionGroupDto, @Req() req) {
     const data = UpdateAuctionGroupSchema.parse(updateAuctionGroupDto);
-    console.log(data)
     return this.auctionGroupsService.update(id, data, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.auctionGroupsService.remove(id);

@@ -1,71 +1,32 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuctionGroup, Prisma, Roles, User } from '@prisma/client';
+import { Prisma, Roles, User } from '@prisma/client';
+import { AccessService, type AccessUser } from '../access/access.service';
+import { SAFE_AUTH_SELECT, accountSelectFor } from '../auction-auth/auction-auth.select';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPathDto } from './dto/add-path.dto';
 import { AddSelectorDto } from './dto/add-selector.dto';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
 
-type AuthUser = { id: string; role: Roles; auctionGroupId?: string | null; managedGroup?: AuctionGroup };
-
 @Injectable()
 export class AuctionsService {
-  constructor(private prismaService: PrismaService) { }
+  constructor(
+    private prismaService: PrismaService,
+    private access: AccessService
+  ) { }
 
-  // ДОДАНО: єдина точка визначення "своєї" групи для Admin — це managedGroup.id,
-  // а не auctionGroupId (те поле стосується лише звичайних User в групі).
-  private getUserGroupId(user: AuthUser): string | null {
-    if (user.role === Roles.Admin) {
-      return user.managedGroup?.id ?? null;
-    }
-    return user.auctionGroupId ?? null;
-  }
-
-  private assertGroupAccess(user: AuthUser, targetGroupId?: string | null) {
-    if (user.role === Roles.SuperAdmin) return;
-    if (user.role === Roles.Admin) {
-      if (!targetGroupId || targetGroupId !== user?.managedGroup?.id) {
-        throw new ForbiddenException('Немає доступу до ресурсів іншої групи');
-      }
-      return;
-    }
-    throw new ForbiddenException('Недостатньо прав');
-  }
-
-  private async assertAuctionGroupAccess(user: AuthUser, auctionId: string) {
-    if (user.role === Roles.SuperAdmin) return;
-    const auction = await this.prismaService.auction.findUnique({
-      where: { id: auctionId },
-      select: { auctionGroupId: true },
-    });
-    if (!auction) throw new NotFoundException('Аукціон не знайдено');
-    this.assertGroupAccess(user, auction.auctionGroupId);
-  }
-
-  async create(createAuctionDto: CreateAuctionDto, user: AuthUser) {
-    const { users, sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
-
-    // ЗМІНЕНО: Group Admin не може створити аукціон у чужій групі —
-    // groupId примусово підміняється на власну групу адміна (managedGroup.id).
-    const effectiveGroupId = user.role === Roles.SuperAdmin ? auctionGroupId : this.getUserGroupId(user);
-
-    if (user.role === Roles.Admin && !this.getUserGroupId(user)) {
-      throw new ForbiddenException('Group Admin без прив’язки до групи не може створювати аукціони');
-    }
+  // Створення/редагування/видалення аукціонів та їхніх правил - лише SuperAdmin (RolesGuard у контролері).
+  // Новий аукціон не додається до жодної групи користувачів автоматично.
+  async create(createAuctionDto: CreateAuctionDto) {
+    const { sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
 
     const auction = await this.prismaService.auction.create({
       data: {
         ...rest,
 
-        ...(effectiveGroupId && {
+        ...(auctionGroupId && {
           auctionGroup: {
-            connect: { id: effectiveGroupId },
-          },
-        }),
-
-        ...(users && {
-          users: {
-            connect: users.map((id) => ({ id })),
+            connect: { id: auctionGroupId },
           },
         }),
 
@@ -86,132 +47,31 @@ export class AuctionsService {
     return auction;
   }
 
-  async findAll(groupId: string, user?: AuthUser) {
+  // Лише явно дозволені аукціони: дозвіл групи аукціонів сам по собі їх не відкриває.
+  // Вкладені акаунти теж обмежуються дозволеними для користувача.
+  async findAll(groupId: string, user?: AccessUser) {
     if (!user?.id) return [];
 
-    // ЗМІНЕНО: SuperAdmin бачить будь-яку групу.
-    // Group Admin (Roles.Admin) — тільки СВОЮ групу, навіть якщо передав інший groupId.
-    if (user.role === Roles.SuperAdmin) {
-      return this.prismaService.auction.findMany({
-        where: { auctionGroupId: groupId },
-        include: {
-          users: true,
-          sessions: true,
-          auctionAuths: true,
-          auctionGroup: true,
-        },
-      });
-    }
-
-    if (user.role === Roles.Admin) {
-      if (groupId !== this.getUserGroupId(user)) {
-        throw new ForbiddenException('Немає доступу до аукціонів іншої групи');
-      }
-      return this.prismaService.auction.findMany({
-        where: { auctionGroupId: groupId },
-        include: {
-          users: true,
-          sessions: true,
-          auctionAuths: true,
-          auctionGroup: true,
-        },
-      });
-    }
-
-    // User — лише аукціони, до яких він явно доданий, або (додатково) аукціони
-    // його групи, ЯКЩО запитувана група збігається з його власною.
-    const orConditions: any[] = [
-      {
-        users: {
-          some: { id: user.id },
-        },
-      },
-    ];
-
-    if (user.auctionGroupId && user.auctionGroupId === groupId) {
-      orConditions.push({
-        auctionGroupId: user.auctionGroupId,
-      });
-    }
-
     return this.prismaService.auction.findMany({
-      where: {
-        auctionGroupId: groupId,
-        OR: orConditions,
-      },
+      where: { AND: [{ auctionGroupId: groupId }, await this.access.auctionWhere(user)] },
       include: {
-        users: true,
         sessions: true,
-        auctionAuths: true,
+        auctionAuths: { where: await this.access.visibleAccountWhere(user), select: accountSelectFor(user.role) },
         auctionGroup: true,
       },
     });
   }
 
-  async findOne(id: string, user?: AuthUser) {
+  async findOne(id: string, user?: AccessUser) {
     if (!user?.id) {
       throw new ForbiddenException('Потрібна авторизація');
     }
 
-    if (user.role === Roles.SuperAdmin) {
-      const auction = await this.prismaService.auction.findUnique({
-        where: { id },
-        include: {
-          users: true,
-          sessions: true,
-          auctionAuths: true,
-          auctionGroup: true,
-        },
-      });
-
-      if (!auction) {
-        throw new NotFoundException('Аукціон не знайдено');
-      }
-
-      return auction;
-    }
-
-    if (user.role === Roles.Admin) {
-      const auction = await this.prismaService.auction.findFirst({
-        where: { id, auctionGroupId: this.getUserGroupId(user) },
-        include: {
-          users: true,
-          sessions: true,
-          auctionAuths: true,
-          auctionGroup: true,
-        },
-      });
-
-      if (!auction) {
-        throw new NotFoundException('Аукціон не знайдено або немає доступу');
-      }
-
-      return auction;
-    }
-
-    const orConditions: any[] = [
-      {
-        users: {
-          some: { id: user.id },
-        },
-      },
-    ];
-
-    if (user.auctionGroupId) {
-      orConditions.push({
-        auctionGroupId: user.auctionGroupId,
-      });
-    }
-
     const auction = await this.prismaService.auction.findFirst({
-      where: {
-        id,
-        OR: orConditions,
-      },
+      where: { AND: [{ id }, await this.access.auctionWhere(user)] },
       include: {
-        users: true,
         sessions: true,
-        auctionAuths: true,
+        auctionAuths: { where: await this.access.visibleAccountWhere(user), select: accountSelectFor(user.role) },
         auctionGroup: true,
       },
     });
@@ -223,14 +83,8 @@ export class AuctionsService {
     return auction;
   }
 
-  async update(id: string, updateAuctionDto: UpdateAuctionDto, user: AuthUser) {
-    // ДОДАНО: GA може редагувати лише аукціони своєї групи.
-    await this.assertAuctionGroupAccess(user, id);
-
-    const { users, sessions, auctionAuths, auctionGroupId, ...rest } = updateAuctionDto;
-
-    // ЗМІНЕНО: перепризначати аукціон в іншу групу може тільки SuperAdmin.
-    const canReassignGroup = user.role === Roles.SuperAdmin;
+  async update(id: string, updateAuctionDto: UpdateAuctionDto) {
+    const { sessions, auctionAuths, auctionGroupId, ...rest } = updateAuctionDto;
 
     try {
       return await this.prismaService.auction.update({
@@ -238,17 +92,10 @@ export class AuctionsService {
         data: {
           ...rest,
 
-          ...(canReassignGroup &&
-            auctionGroupId !== undefined && {
+          ...(auctionGroupId !== undefined && {
             auctionGroup: auctionGroupId
               ? { connect: { id: auctionGroupId } }
               : { disconnect: true },
-          }),
-
-          ...(users && {
-            users: {
-              set: users.map((id) => ({ id })),
-            },
           }),
 
           ...(sessions && {
@@ -264,9 +111,8 @@ export class AuctionsService {
           }),
         },
         include: {
-          users: true,
           sessions: true,
-          auctionAuths: true,
+          auctionAuths: { select: SAFE_AUTH_SELECT },
           auctionGroup: true,
         },
       });
@@ -278,10 +124,7 @@ export class AuctionsService {
     }
   }
 
-  async remove(id: string, user: AuthUser) {
-    // ДОДАНО: видалення аукціону — тільки в межах своєї групи для GA.
-    await this.assertAuctionGroupAccess(user, id);
-
+  async remove(id: string) {
     await this.prismaService.session.deleteMany({
       where: { auctionId: id },
     });
@@ -295,68 +138,14 @@ export class AuctionsService {
     });
   }
 
-  async addUser(auctionId: string, userId: string, adminUser: AuthUser) {
-    // ДОДАНО: перевірка групи.
-    await this.assertAuctionGroupAccess(adminUser, auctionId);
-
-    const auction = await this.prismaService.auction.findUnique({
-      where: { id: auctionId },
-      include: { users: true },
-    });
-
-    const alreadyAdded = auction?.users.some((u) => u.id === userId);
-
-    if (alreadyAdded) return auction;
-
-    return await this.prismaService.auction.update({
-      where: { id: auctionId },
-      data: {
-        users: {
-          connect: { id: userId },
-        },
-      },
-    });
-  }
-
-  async removeUser(auctionId: string, userId: string, adminUser: AuthUser) {
-    await this.assertAuctionGroupAccess(adminUser, auctionId);
-
-    const auction = await this.prismaService.auction.findUnique({
-      where: { id: auctionId },
-      include: { users: true },
-    });
-
-    if (!auction) {
-      throw new NotFoundException('Аукціон не знайдено');
-    }
-
-    const isAttached = auction.users.some((u) => u.id === userId);
-
-    if (!isAttached) {
-      return auction;
-    }
-
-    return await this.prismaService.auction.update({
-      where: { id: auctionId },
-      data: {
-        users: {
-          disconnect: { id: userId },
-        },
-      },
-    });
-  }
-
   async search(params: {
-    user?: AuthUser;
+    user: AccessUser;
     query?: string;
     auctionGroupId?: string;
   }) {
     const { user, query, auctionGroupId } = params;
 
-    // ВИДАЛЕНО: console.log(user, query, auctionGroupId, isAdmin) — не логуємо
-    // персональні дані користувача в продакшн-логи.
-
-    const andConditions: any[] = [];
+    const andConditions: Prisma.AuctionWhereInput[] = [await this.access.auctionWhere(user)];
 
     if (query) {
       andConditions.push({
@@ -377,37 +166,12 @@ export class AuctionsService {
       });
     }
 
-    if (user?.role === Roles.SuperAdmin) {
-      // SuperAdmin може фільтрувати по будь-якій групі (або без фільтра — всі).
-      if (auctionGroupId) {
-        andConditions.push({ auctionGroupId });
-      }
-    } else if (user?.role === Roles.Admin) {
-      // ЗМІНЕНО: GA завжди обмежений своєю групою (managedGroup.id),
-      // навіть якщо в query передали іншу.
-      andConditions.push({ auctionGroupId: this.getUserGroupId(user) });
-    } else {
-      const orConditions: any[] = [
-        {
-          users: {
-            some: { id: user?.id },
-          },
-        },
-      ];
-
-      if (user?.auctionGroupId) {
-        orConditions.push({
-          auctionGroupId: user.auctionGroupId,
-        });
-      }
-
-      andConditions.push({
-        OR: orConditions,
-      });
+    if (auctionGroupId) {
+      andConditions.push({ auctionGroupId });
     }
 
     return this.prismaService.auction.findMany({
-      where: andConditions.length > 0 ? { AND: andConditions } : {},
+      where: { AND: andConditions },
       include: {
         auctionGroup: true,
       },
@@ -415,10 +179,7 @@ export class AuctionsService {
     });
   }
 
-  async addSelector(auctionId: string, body: AddSelectorDto, adminUser: AuthUser) {
-    // ДОДАНО: GA може додавати заборонені селектори лише для свого аукціону.
-    await this.assertAuctionGroupAccess(adminUser, auctionId);
-
+  async addSelector(auctionId: string, body: AddSelectorDto) {
     const selector = await this.prismaService.forbiddenSelector.create({
       data: {
         ...body,
@@ -430,9 +191,7 @@ export class AuctionsService {
     return selector;
   }
 
-  async addPathAllowed(auctionId: string, body: AddPathDto, adminUser: AuthUser) {
-    await this.assertAuctionGroupAccess(adminUser, auctionId);
-
+  async addPathAllowed(auctionId: string, body: AddPathDto) {
     const allowed = await this.prismaService.allowedRoute.create({
       data: {
         ...body,
@@ -444,9 +203,7 @@ export class AuctionsService {
     return allowed;
   }
 
-  async addPathForbidden(auctionId: string, body: AddPathDto, adminUser: AuthUser) {
-    await this.assertAuctionGroupAccess(adminUser, auctionId);
-
+  async addPathForbidden(auctionId: string, body: AddPathDto) {
     const forbidden = await this.prismaService.forbiddenRoute.create({
       data: {
         ...body,
@@ -458,13 +215,9 @@ export class AuctionsService {
     return forbidden;
   }
 
-  // ДОДАНО: для видалення allowed/forbidden path та selector спершу знаходимо
-  // запис, дістаємо auctionId і перевіряємо групу GA — інакше GA міг видалити
-  // правило будь-якого аукціону, знаючи лише id запису.
-  async deletePathAllowed(allowedId: string, adminUser: AuthUser) {
+  async deletePathAllowed(allowedId: string) {
     const record = await this.prismaService.allowedRoute.findUnique({ where: { id: allowedId } });
     if (!record) return { status: true };
-    await this.assertAuctionGroupAccess(adminUser, record.auctionId);
 
     await this.prismaService.allowedRoute.deleteMany({
       where: { id: allowedId }
@@ -472,10 +225,9 @@ export class AuctionsService {
     return { status: true }
   }
 
-  async deletePathForbidden(id: string, adminUser: AuthUser) {
+  async deletePathForbidden(id: string) {
     const record = await this.prismaService.forbiddenRoute.findUnique({ where: { id } });
     if (!record) return { status: true };
-    await this.assertAuctionGroupAccess(adminUser, record.auctionId);
 
     await this.prismaService.forbiddenRoute.deleteMany({
       where: { id }
@@ -483,10 +235,9 @@ export class AuctionsService {
     return { status: true }
   }
 
-  async deleteSelector(id: string, adminUser: AuthUser) {
+  async deleteSelector(id: string) {
     const record = await this.prismaService.forbiddenSelector.findUnique({ where: { id } });
     if (!record) return { status: true };
-    await this.assertAuctionGroupAccess(adminUser, record.auctionId);
 
     await this.prismaService.forbiddenSelector.deleteMany({
       where: { id }
@@ -494,21 +245,22 @@ export class AuctionsService {
     return { status: true }
   }
 
-  async getForbiddenPath(id: string) {
+  // Правила аукціону - лише тим, хто має доступ до аукціону.
+  async getForbiddenPath(id: string, user: AccessUser) {
+    await this.access.assertCanAccessAuction(user, id);
     const paths = await this.prismaService.forbiddenRoute.findMany({ where: { auctionId: id } });
     return paths;
   }
 
   async getForbiddenSelector(auctionId: string, user: User) {
-    const selectors = await this.prismaService.forbiddenSelector.findMany({
-      where: { auctionId },
-    });
-
-    // ЗМІНЕНО: неавторизований запит більше не отримує повний список
-    // (раніше `!user` потрапляв у ту саму гілку, що й SuperAdmin).
     if (!user) {
       throw new ForbiddenException('Потрібна авторизація');
     }
+    await this.access.assertCanAccessAuction(user, auctionId);
+
+    const selectors = await this.prismaService.forbiddenSelector.findMany({
+      where: { auctionId },
+    });
 
     if (user.role === Roles.SuperAdmin) return selectors;
 
@@ -520,7 +272,8 @@ export class AuctionsService {
     return selectors;
   }
 
-  async getAllowedPath(id: string) {
+  async getAllowedPath(id: string, user: AccessUser) {
+    await this.access.assertCanAccessAuction(user, id);
     const paths = await this.prismaService.allowedRoute.findMany({ where: { auctionId: id } });
     return paths;
   }

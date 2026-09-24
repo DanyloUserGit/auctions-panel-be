@@ -18,7 +18,7 @@ export class AuctionAuthController {
   constructor(private readonly auctionAuthService: AuctionAuthService) { }
 
   @UseGuards(RolesGuard)
-  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @RolesDecorator(Roles.SuperAdmin)
   @Post()
   @ApiBody({ type: CreateAuctionAuthSwaggerDto })
   @ApiCreatedResponse({
@@ -27,9 +27,9 @@ export class AuctionAuthController {
       allOf: [{ $ref: getSchemaPath(CreateAuctionAuthSwaggerDto) }],
     },
   })
-  create(@Body() createAuctionAuthDto: CreateAuctionAuthDto, @Req() req) {
+  create(@Body() createAuctionAuthDto: CreateAuctionAuthDto) {
     const data = CreateAuctionAuthSchema.parse(createAuctionAuthDto);
-    return this.auctionAuthService.create(data, req.user);
+    return this.auctionAuthService.create(data);
   }
 
   @Post('select-account')
@@ -43,10 +43,10 @@ export class AuctionAuthController {
   }
 
   @UseGuards(RolesGuard)
-  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @RolesDecorator(Roles.SuperAdmin)
   @Get('account/:id')
-  findOne(@Param('id') id: string, @Req() req) {
-    return this.auctionAuthService.findOne(id, req.user);
+  findOne(@Param('id') id: string) {
+    return this.auctionAuthService.findOne(id);
   }
 
   @UseGuards(RolesGuard)
@@ -57,7 +57,7 @@ export class AuctionAuthController {
   }
 
   @UseGuards(RolesGuard)
-  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @RolesDecorator(Roles.SuperAdmin)
   @Patch(':id')
   @ApiBody({ type: CreateAuctionAuthSwaggerDto })
   @ApiCreatedResponse({
@@ -66,9 +66,9 @@ export class AuctionAuthController {
       allOf: [{ $ref: getSchemaPath(CreateAuctionAuthSwaggerDto) }],
     },
   })
-  update(@Param('id') id: string, @Body() updateAuctionAuthDto: UpdateAuctionAuthDto, @Req() req) {
+  update(@Param('id') id: string, @Body() updateAuctionAuthDto: UpdateAuctionAuthDto) {
     const data = UpdateAuctionAuthSchema.parse(updateAuctionAuthDto);
-    return this.auctionAuthService.update(id, data, req.user);
+    return this.auctionAuthService.update(id, data);
   }
 
   @Delete('remove-account/:accountId')
@@ -77,9 +77,9 @@ export class AuctionAuthController {
   }
 
   @UseGuards(RolesGuard)
-  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @RolesDecorator(Roles.SuperAdmin)
   @Delete(':id')
-  remove(@Param('id') id: string, @Req() req) {
-    return this.auctionAuthService.remove(id, req.user);
+  remove(@Param('id') id: string) {
+    return this.auctionAuthService.remove(id);
   }
 }

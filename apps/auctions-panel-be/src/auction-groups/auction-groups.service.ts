@@ -1,7 +1,7 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Roles, User } from '@prisma/client';
 
-import { NotificationService } from '../notification/notification.service';
+import { AccessService, type AccessUser } from '../access/access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAuctionGroupDto } from './dto/create-auction-group.dto';
 import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
@@ -10,23 +10,17 @@ import { UpdateAuctionGroupDto } from './dto/update-auction-group.dto';
 export class AuctionGroupsService {
   constructor(
     private prisma: PrismaService,
-    private notificationService: NotificationService,
+    private access: AccessService
   ) { }
 
   private withCounts(data: any | any[]) {
     if (!data) return data;
 
-    const formatGroup = (group: any) => {
-      const adminCount = group.AdminId ? 1 : 0;
-      const usersCount = (group._count?.users || 0) + adminCount;
-      const auctionsCount = group._count?.auctions || 0;
-
-      return {
-        ...group,
-        usersCount,
-        auctionsCount,
-      };
-    };
+    const formatGroup = (group: any) => ({
+      ...group,
+      auctionsCount: group._count?.auctions ?? 0,
+      sessionsCount: group._count?.sessions ?? 0,
+    });
 
     if (Array.isArray(data)) {
       return data.map(formatGroup);
@@ -35,194 +29,62 @@ export class AuctionGroupsService {
   }
 
   async create(createAuctionGroupDto: CreateAuctionGroupDto, user: User) {
-    const { auctions, Admin, users, ...rest } = createAuctionGroupDto;
+    const { auctions, ...rest } = createAuctionGroupDto;
 
     const isSuperAdmin = user?.role === Roles.SuperAdmin;
-
     if (!isSuperAdmin) {
       delete createAuctionGroupDto.sessionLimit;
-      delete createAuctionGroupDto.canGaManageAccounts;
     }
 
-    const group = await this.prisma.auctionGroup.create({
+    return this.prisma.auctionGroup.create({
       data: {
         ...rest,
-        ...(Admin && {
-          Admin: {
-            connect: { id: Admin },
-          },
-        }),
-        ...(users && {
-          users: {
-            connect: users.map((id) => ({ id })),
-          },
-        }),
         ...(auctions && {
           auctions: {
             connect: auctions.map((id) => ({ id })),
           },
         }),
-        isActive: true,
-        lastActivity: new Date(),
       },
-      include: {
-        auctions: true,
-        accounts: true,
-      },
+      include: { auctions: true },
     });
-
-    if (users && users.length > 0) {
-      await Promise.all(
-        users.map((userId) =>
-          this.notificationService.notify(userId, 'ADDED_TO_GROUP', {
-            subject: 'Додавання до групи',
-            body: `Вас додано до групи аукціонів "${group.title}"`,
-          }),
-        ),
-      );
-    }
-
-    return group;
   }
 
-  async findAll(user?: { id: string; role: Roles }) {
-    if (!user?.id) return [];
+  // SuperAdmin бачить усі групи аукціонів; решта - лише дозволені їхній групі користувачів.
+  // Вкладені аукціони та їх кількість - лише явно дозволені (не всі аукціони групи).
+  private async readQuery(user: AccessUser) {
+    const auctionWhere = await this.access.auctionWhere(user);
+    return {
+      where: await this.access.auctionGroupWhere(user),
+      include: {
+        auctions: { where: auctionWhere },
+        // Для ліміту сесій показуємо саме активні сесії групи.
+        _count: { select: { auctions: { where: auctionWhere }, sessions: { where: { isActive: true } } } },
+      },
+    };
+  }
 
-    const isSuperAdmin = user?.role === Roles.SuperAdmin;
-    const isGroupAdmin = user?.role === Roles.Admin;
-
-    if (isSuperAdmin) {
-      const groups = await this.prisma.auctionGroup.findMany({
-        include: {
-          auctions: true,
-          accounts: true,
-          _count: { select: { users: true, auctions: true } },
-        },
-      });
-      return this.withCounts(groups);
-    }
-
-    if (isGroupAdmin) {
-      const groups = await this.prisma.auctionGroup.findMany({
-        where: { Admin: { id: user.id } },
-        include: {
-          auctions: true,
-          accounts: true,
-          _count: { select: { users: true, auctions: true } },
-        },
-      });
-      return this.withCounts(groups);
-    }
-
-    const userFull = await this.prisma.user.findFirst({
-      where: { id: user.id },
-      select: { auctionGroupId: true }
-    });
+  async findAll(user: AccessUser) {
+    const { where, include } = await this.readQuery(user);
 
     const groups = await this.prisma.auctionGroup.findMany({
-      where: {
-        OR: [
-          {
-            auctions: {
-              some: {
-                users: {
-                  some: { id: user.id },
-                },
-              },
-            },
-          },
-          {
-            id: userFull?.auctionGroupId || undefined,
-          }
-        ],
-      },
-      include: {
-        auctions: {
-          where: {
-            users: {
-              some: { id: user.id },
-            },
-          },
-        },
-        accounts: true,
-        _count: { select: { users: true, auctions: true } },
-      },
+      where,
+      include,
+      orderBy: { title: 'asc' },
     });
 
     return this.withCounts(groups);
-    return this.withCounts(groups);
   }
 
-  async findOne(id: string, user?: { id: string; role: Roles }) {
-    if (!user?.id) {
-      throw new ForbiddenException('Потрібна авторизація');
-    }
-
-    const isSuperAdmin = user?.role === Roles.SuperAdmin;
-    const isGroupAdmin = user?.role === Roles.Admin;
-
-    if (isSuperAdmin) {
-      const groups = await this.prisma.auctionGroup.findMany({
-        where: { id },
-        include: {
-          auctions: true,
-          accounts: true,
-          _count: {
-            select: {
-              users: true, auctions: true,
-              accounts: true,
-            }
-          },
-        },
-      });
-      return this.withCounts(groups);
-    }
-
-    if (isGroupAdmin) {
-      const groups = await this.prisma.auctionGroup.findMany({
-        where: { id, Admin: { id: user.id } },
-        include: {
-          auctions: true,
-          _count: {
-            select: {
-              users: true, auctions: true,
-              accounts: true,
-            }
-          },
-        },
-      });
-      return this.withCounts(groups);
-    }
+  async findOne(id: string, user: AccessUser) {
+    const { where, include } = await this.readQuery(user);
 
     const group = await this.prisma.auctionGroup.findFirst({
-      where: {
-        id,
-        auctions: {
-          some: {
-            users: {
-              some: {
-                id: user.id,
-              },
-            },
-          },
-        },
-      },
-      include: {
-        auctions: {
-          where: {
-            users: {
-              some: {
-                id: user.id,
-              },
-            },
-          },
-        },
-        _count: { select: { users: true, auctions: true, accounts: true, } },
-      },
+      where: { AND: [{ id }, where] },
+      include,
     });
 
     if (!group) {
-      throw new NotFoundException('Група аукціонів не знайдена або немає доступу');
+      throw new NotFoundException('Група аукціонів не знайдена');
     }
 
     return this.withCounts(group);
@@ -230,118 +92,36 @@ export class AuctionGroupsService {
 
   async update(id: string, updateAuctionGroupDto: UpdateAuctionGroupDto, user: User) {
     const isSuperAdmin = user?.role === Roles.SuperAdmin;
-
     if (!isSuperAdmin) {
       delete updateAuctionGroupDto.sessionLimit;
-      delete updateAuctionGroupDto.canGaManageAccounts;
     }
 
-    const { auctions, Admin, users, ...rest } = updateAuctionGroupDto;
+    const { auctions, ...rest } = updateAuctionGroupDto;
 
-    const group = await this.prisma.auctionGroup.update({
+    return this.prisma.auctionGroup.update({
       where: { id },
       data: {
         ...rest,
-        ...(Admin && {
-          Admin: {
-            connect: { id: Admin },
-          },
-        }),
-        ...(users && {
-          users: {
-            connect: users.map((id) => ({ id })),
-          },
-        }),
         ...(auctions && {
-          auctions: {
-            set: auctions.map((id) => ({ id })),
-          },
+          auctions: { set: auctions.map((id) => ({ id })) },
         }),
-        lastActivity: new Date(),
       },
-      include: {
-        auctions: true,
-      },
+      include: { auctions: true },
     });
-
-    if (users && users.length > 0) {
-      await Promise.all(
-        users.map((userId) =>
-          this.notificationService.notify(userId, 'ADDED_TO_GROUP', {
-            subject: 'Додавання до групи',
-            body: `Вас додано до групи аукціонів "${group.title}"`,
-          }),
-        ),
-      );
-    }
-
-    return group;
-  }
-
-  async blockGroup(id: string) {
-    try {
-      return await this.prisma.auctionGroup.update({ where: { id }, data: { isActive: false } })
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async unBlockGroup(id: string) {
-    try {
-      return await this.prisma.auctionGroup.update({ where: { id }, data: { isActive: true } })
-    } catch (error) {
-      throw error;
-    }
   }
 
   async remove(id: string) {
-    return await this.prisma.auctionGroup.delete({
-      where: { id },
-    });
+    return this.prisma.auctionGroup.delete({ where: { id } });
   }
 
-  async search(params: { user?: { id: string; role: Roles }; query?: string }) {
-    const { user, query } = params;
-    const isAdmin = user?.role === Roles.Admin || user?.role === Roles.SuperAdmin;
+  async search(user: AccessUser, query?: string) {
+    const { where, include } = await this.readQuery(user);
 
     const groups = await this.prisma.auctionGroup.findMany({
       where: {
-        AND: [
-          query
-            ? {
-              title: {
-                contains: query,
-                mode: 'insensitive',
-              },
-            }
-            : {},
-
-          !isAdmin
-            ? {
-              auctions: {
-                some: {
-                  users: {
-                    some: { id: user?.id },
-                  },
-                },
-              },
-            }
-            : {},
-        ],
+        AND: [where, query ? { title: { contains: query, mode: 'insensitive' } } : {}],
       },
-      include: {
-        auctions: isAdmin
-          ? true
-          : {
-            where: {
-              users: {
-                some: { id: user?.id },
-              },
-            },
-          },
-        accounts: true,
-        _count: { select: { users: true, auctions: true } },
-      },
+      include,
       orderBy: { title: 'asc' },
     });
 
@@ -354,59 +134,35 @@ export class AuctionGroupsService {
       include: { auctions: true },
     });
 
-    const alreadyAdded = group?.auctions.some((u) => u.id === auctionId);
+    if (!group) {
+      throw new NotFoundException('Групу аукціонів не знайдено');
+    }
 
+    const alreadyAdded = group.auctions.some((a) => a.id === auctionId);
     if (alreadyAdded) return group;
 
-    return await this.prisma.auctionGroup.update({
+    return this.prisma.auctionGroup.update({
       where: { id: groupId },
-      data: {
-        auctions: {
-          connect: { id: auctionId },
-        },
-        lastActivity: new Date(),
-      },
+      data: { auctions: { connect: { id: auctionId } } },
     });
   }
 
-  async removeAuction(groupId: string, userId: string) {
+  async removeAuction(groupId: string, auctionId: string) {
     const group = await this.prisma.auctionGroup.findUnique({
       where: { id: groupId },
       include: { auctions: true },
     });
 
     if (!group) {
-      throw new NotFoundException('Аукціон не знайдено');
+      throw new NotFoundException('Групу аукціонів не знайдено');
     }
 
-    const isAttached = group.auctions.some((u) => u.id === userId);
+    const isAttached = group.auctions.some((a) => a.id === auctionId);
+    if (!isAttached) return group;
 
-    if (!isAttached) {
-      return group;
-    }
-
-    return await this.prisma.auctionGroup.update({
+    return this.prisma.auctionGroup.update({
       where: { id: groupId },
-      data: {
-        auctions: {
-          disconnect: { id: userId },
-        },
-        lastActivity: new Date(),
-      },
-    });
-  }
-
-  async grantAccountAccess(groupId: string, userId: string) {
-    return await this.prisma.auctionGroup.update({
-      where: { id: groupId },
-      data: { accounts: { connect: { id: userId } }, lastActivity: new Date() },
-    });
-  }
-
-  async revokeAccountAccess(groupId: string, userId: string) {
-    return await this.prisma.auctionGroup.update({
-      where: { id: groupId },
-      data: { accounts: { disconnect: { id: userId } }, lastActivity: new Date() },
+      data: { auctions: { disconnect: { id: auctionId } } },
     });
   }
 }

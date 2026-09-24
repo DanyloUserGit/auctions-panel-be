@@ -36,7 +36,7 @@ export class NotificationController {
     }
 
     @Get('my-groups')
-    @ApiOperation({ summary: 'Отримати список груп, де користувач є адміністратором' })
+    @ApiOperation({ summary: 'Отримати список груп користувачів, де поточний користувач є адміністратором' })
     async getMyGroups(@Req() req) {
         return this.notificationService.getMyAdminGroups(req.user.id);
     }
@@ -88,7 +88,7 @@ export class NotificationController {
 
     @Get('group/:groupId/requirements')
     @ApiOperation({ summary: 'Отримати поточні обов\'язкові налаштування групи (Тільки для Адмінів групи)' })
-    @ApiParam({ name: 'groupId', required: true, description: 'ID групи аукціонів' })
+    @ApiParam({ name: 'groupId', required: true, description: 'ID групи користувачів (UserGroup)' })
     @ApiResponse({ status: 200, description: 'Список типів сповіщень зі статусом isMandatory.' })
     @ApiResponse({ status: 403, description: 'Користувач не є адміністратором групи.' })
     async getGroupRequirements(@Req() req, @Param('groupId') groupId: string) {
@@ -97,7 +97,7 @@ export class NotificationController {
 
     @Patch('group/:groupId/requirements')
     @ApiOperation({ summary: 'Встановити обов\'язкове сповіщення для групи (Тільки для Адмінів групи)' })
-    @ApiParam({ name: 'groupId', required: true, description: 'ID групи аукціонів' })
+    @ApiParam({ name: 'groupId', required: true, description: 'ID групи користувачів (UserGroup)' })
     @ApiBody({ type: SetGroupRequirementDto })
     @ApiResponse({ status: 200, description: 'Обов\'язкове правило встановлено.' })
     @ApiResponse({ status: 403, description: 'Користувач не є адміністратором групи.' })

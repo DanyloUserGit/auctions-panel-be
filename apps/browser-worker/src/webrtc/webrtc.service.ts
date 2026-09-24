@@ -221,7 +221,7 @@ export class WebrtcService {
     }
 
     // Помилка самого процесу (напр. бінарник ffmpeg не знайдено) приходить сюди,
-    // а НЕ в 'error' на stdin — тому обробляємо окремо.
+    // а НЕ в 'error' на stdin - тому обробляємо окремо.
     ffmpegCmd.on('error', (err) => {
       this.logger.error(`[FFMPEG ${clientId}] Помилка процесу:`, err);
     });

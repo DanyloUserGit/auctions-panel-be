@@ -1,54 +1,25 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
-import { Roles, User } from '@prisma/client';
+import { User } from '@prisma/client';
+import { AccessService, type AccessUser } from '../access/access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptData } from '../utils/encrypt';
+import { SAFE_AUTH_SELECT, accountSelectFor } from './auction-auth.select';
 import { CreateAuctionAuthDto } from './dto/create-auction-auth.dto';
 import { UpdateAuctionAuthDto } from './dto/update-auction-auth.dto';
 
-type AuthUser = {
-  id: string;
-  role: Roles;
-  auctionGroupId?: string | null;
-  managedGroup?: { id: string } | null;
-};
-
-const SAFE_AUTH_SELECT = {
-  id: true,
-  title: true,
-  email: true,
-  auctionId: true,
-} as const;
+export { SAFE_AUTH_SELECT };
 
 @Injectable()
 export class AuctionAuthService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly access: AccessService
+  ) { }
 
-  private getUserGroupId(user: AuthUser): string | null {
-    if (user.role === Roles.Admin) {
-      return user.managedGroup?.id ?? null;
-    }
-    return user.auctionGroupId ?? null;
-  }
-
-  private async assertAuctionGroupAccess(user: AuthUser, auctionId: string) {
-    if (user.role === Roles.SuperAdmin) return;
-    // if (user.role !== Roles.Admin) {
-    //   throw new ForbiddenException('Недостатньо прав');
-    // }
-    const auction = await this.prisma.auction.findUnique({
-      where: { id: auctionId },
-      select: { auctionGroupId: true },
-    });
-    const userGroupId = this.getUserGroupId(user);
-    if (!auction || !userGroupId || auction.auctionGroupId !== userGroupId) {
-      throw new ForbiddenException('Немає доступу до аукціонів іншої групи');
-    }
-  }
-
-  async create(dto: CreateAuctionAuthDto, adminUser: AuthUser) {
-    await this.assertAuctionGroupAccess(adminUser, dto.auctionId);
-
+  // Створення/редагування/видалення акаунтів - лише SuperAdmin (RolesGuard у контролері).
+  // Новий акаунт не додається до жодної групи користувачів автоматично.
+  async create(dto: CreateAuctionAuthDto) {
     const hashedPassword = encryptData(dto.password);
 
     try {
@@ -69,45 +40,25 @@ export class AuctionAuthService {
     }
   }
 
-  async findAll(auctionId: string, adminUser: AuthUser) {
-    await this.assertAuctionGroupAccess(adminUser, auctionId);
+  // Лише акаунти, явно дозволені користувачу (через групу або особисто) у доступному аукціоні.
+  // Логін (email) повертається лише SuperAdmin; при вимкненому showAccounts - лише акаунти із запущеною сесією.
+  async findAll(auctionId: string, user: AccessUser) {
+    await this.access.assertCanAccessAuction(user, auctionId);
 
     return this.prisma.auctionAuth.findMany({
-      where: { auctionId },
-      select: SAFE_AUTH_SELECT,
+      where: { AND: [{ auctionId }, await this.access.visibleAccountWhere(user)] },
+      select: accountSelectFor(user.role),
       orderBy: { email: 'asc' },
     });
   }
 
-  private async assertAccountAllowedForUser(user: AuthUser, accountId: string) {
-    const account = await this.prisma.auctionAuth.findUnique({
-      where: { id: accountId },
-      select: {
-        id: true,
-        auction: {
-          select: {
-            auctionGroupId: true,
-            users: { select: { id: true } },
-          },
-        },
-      },
-    });
-
-    if (!account) {
+  private async assertAccountAllowedForUser(user: AccessUser, accountId: string) {
+    const exists = await this.prisma.auctionAuth.count({ where: { id: accountId } });
+    if (!exists) {
       throw new NotFoundException('Акаунт не знайдено');
     }
 
-    if (user.role === Roles.SuperAdmin) return account;
-
-    const explicitlyAllowed = account.auction.users.some((u) => u.id === user.id);
-    const userGroupId = this.getUserGroupId(user);
-    const sameGroup = !!userGroupId && userGroupId === account.auction.auctionGroupId;
-
-    if (!explicitlyAllowed && !sameGroup) {
-      throw new ForbiddenException('Цей акаунт вам не дозволено використовувати');
-    }
-
-    return account;
+    await this.access.assertCanUseAccount(user, accountId);
   }
 
   async selectAccount(accountId: string, user: User) {
@@ -166,44 +117,37 @@ export class AuctionAuthService {
   async getSelectedAccounts(user: User) {
     if (!user) throw new UnauthorizedException('Користувач не знайдений');
 
+    // Обрані акаунти, до яких доступ уже відкликано, не повертаються.
     const userS = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: {
-        selectedAccounts: { select: SAFE_AUTH_SELECT },
+        selectedAccounts: {
+          where: await this.access.visibleAccountWhere(user),
+          select: accountSelectFor(user.role),
+        },
       },
     });
     return userS?.selectedAccounts ?? [];
   }
 
-  async findOne(id: string, adminUser: AuthUser) {
+  async findOne(id: string) {
     const auth = await this.prisma.auctionAuth.findUnique({
       where: { id },
-      select: { ...SAFE_AUTH_SELECT, auction: { select: { auctionGroupId: true } } },
+      select: SAFE_AUTH_SELECT,
     });
 
     if (!auth) {
       throw new NotFoundException('AuctionAuth не знайдено');
     }
-    if (adminUser.role !== Roles.SuperAdmin && auth.auction.auctionGroupId !== this.getUserGroupId(adminUser)) {
-      throw new ForbiddenException('Немає доступу до акаунта іншої групи');
-    }
 
-    const { auction, ...rest } = auth;
-    return rest;
+    return auth;
   }
 
-  async update(id: string, dto: UpdateAuctionAuthDto, adminUser: AuthUser) {
-    const existing = await this.prisma.auctionAuth.findUnique({
-      where: { id },
-      select: { auctionId: true, auction: { select: { auctionGroupId: true } } },
-    });
+  async update(id: string, dto: UpdateAuctionAuthDto) {
+    const existing = await this.prisma.auctionAuth.count({ where: { id } });
 
     if (!existing) {
       throw new NotFoundException('AuctionAuth не знайдено');
-    }
-
-    if (adminUser.role !== Roles.SuperAdmin && existing.auction.auctionGroupId !== this.getUserGroupId(adminUser)) {
-      throw new ForbiddenException('Немає доступу до акаунта іншої групи');
     }
 
     const data: any = { ...dto };
@@ -226,18 +170,11 @@ export class AuctionAuthService {
     }
   }
 
-  async remove(id: string, adminUser: AuthUser) {
-    const existing = await this.prisma.auctionAuth.findUnique({
-      where: { id },
-      select: { auction: { select: { auctionGroupId: true } } },
-    });
+  async remove(id: string) {
+    const existing = await this.prisma.auctionAuth.count({ where: { id } });
 
     if (!existing) {
       throw new NotFoundException('AuctionAuth не знайдено');
-    }
-
-    if (adminUser.role !== Roles.SuperAdmin && existing.auction.auctionGroupId !== this.getUserGroupId(adminUser)) {
-      throw new ForbiddenException('Немає доступу до акаунта іншої групи');
     }
 
     await this.prisma.auctionAuth.delete({

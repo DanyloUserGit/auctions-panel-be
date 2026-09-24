@@ -26,22 +26,22 @@ export class NotificationService {
     }
 
     /**
-     * Користувач належить щонайбільше одній групі (User.auctionGroupId),
+     * Користувач належить щонайбільше одній групі (User.userGroupId),
      * тож обов'язковість перевіряється відносно саме цієї групи.
      */
     private async getMandatoryTypeIdsForUser(userId: string): Promise<Set<string>> {
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
-            select: { auctionGroupId: true }
+            select: { userGroupId: true }
         });
 
-        if (!user?.auctionGroupId) {
+        if (!user?.userGroupId) {
             return new Set();
         }
 
         const requirements = await this.prisma.groupNotificationRequirement.findMany({
             where: {
-                groupId: user.auctionGroupId,
+                groupId: user.userGroupId,
                 isMandatory: true
             },
             select: { notificationTypeId: true }
@@ -53,16 +53,16 @@ export class NotificationService {
     private async isMandatoryForUser(userId: string, typeId: string): Promise<boolean> {
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
-            select: { auctionGroupId: true }
+            select: { userGroupId: true }
         });
 
-        if (!user?.auctionGroupId) {
+        if (!user?.userGroupId) {
             return false;
         }
 
         const requirement = await this.prisma.groupNotificationRequirement.findFirst({
             where: {
-                groupId: user.auctionGroupId,
+                groupId: user.userGroupId,
                 notificationTypeId: typeId,
                 isMandatory: true
             }
@@ -266,7 +266,7 @@ export class NotificationService {
             throw new BadRequestException("Цей тип сповіщень не налаштовується.");
         }
 
-        // Якщо користувач намагається вимкнути обов'язкове (для його групи) сповіщення — забороняємо
+        // Якщо користувач намагається вимкнути обов'язкове (для його групи) сповіщення - забороняємо
         if (updateDto.isEnabled === false) {
             const isMandatory = await this.isMandatoryForUser(userId, typeId);
             if (isMandatory) {
@@ -358,7 +358,7 @@ export class NotificationService {
     }
 
     async setGroupMandatoryRequirement(adminUserId: string, groupId: string, typeId: string, isMandatory: boolean) {
-        const group = await this.prisma.auctionGroup.findUnique({ where: { id: groupId } });
+        const group = await this.prisma.userGroup.findUnique({ where: { id: groupId } });
 
         if (!group || group.AdminId !== adminUserId) {
             throw new ForbiddenException("Тільки адміністратор групи може змінювати ці налаштування");
@@ -378,10 +378,10 @@ export class NotificationService {
 
     /**
      * Список усіх налаштовуваних типів сповіщень для групи разом з поточним
-     * статусом isMandatory — для екрану адміністрування групи.
+     * статусом isMandatory - для екрану адміністрування групи.
      */
     async getGroupRequirements(adminUserId: string, groupId: string) {
-        const group = await this.prisma.auctionGroup.findUnique({ where: { id: groupId } });
+        const group = await this.prisma.userGroup.findUnique({ where: { id: groupId } });
 
         if (!group || group.AdminId !== adminUserId) {
             throw new ForbiddenException("Тільки адміністратор групи може переглядати ці налаштування");
@@ -404,13 +404,13 @@ export class NotificationService {
 
     /**
      * Групи, де поточний користувач є адміністратором. AdminId унікальний
-     * на AuctionGroup, тож користувач керує щонайбільше однією групою —
+     * на UserGroup, тож користувач керує щонайбільше однією групою -
      * але для зручності фронтенду (селектор) повертаємо масив.
      */
     async getMyAdminGroups(userId: string) {
-        return this.prisma.auctionGroup.findMany({
+        return this.prisma.userGroup.findMany({
             where: { AdminId: userId },
-            select: { id: true, title: true }
+            select: { id: true, name: true }
         });
     }
 

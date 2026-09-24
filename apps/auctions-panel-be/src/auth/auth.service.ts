@@ -105,6 +105,10 @@ export class AuthService {
       throw new UnauthorizedException('Неправильний refresh token');
     }
 
+    if (tokenRecord.user.isBlocked) {
+      throw new UnauthorizedException('Користувача заблоковано');
+    }
+
     await this.prisma.refreshToken.delete({
       where: { token: oldRefreshToken },
     });

@@ -6,6 +6,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import * as streamifier from 'streamifier';
 import { CreateInfoPageDto, CreateTrainingDto, UpdateInfoPageDto } from './dto/create-training.dto';
 
+
 @Injectable()
 export class TrainingService {
     constructor(private prisma: PrismaService) {
@@ -93,7 +94,7 @@ export class TrainingService {
         if (!material) throw new NotFoundException('Матеріал не знайдено');
 
         if (user.role !== Roles.SuperAdmin) {
-            const AdminInfo = await this.prisma.auctionGroup.findUnique({
+            const AdminInfo = await this.prisma.userGroup.findUnique({
                 where: { AdminId: user.id }
             });
 
@@ -123,7 +124,7 @@ export class TrainingService {
                 {
                     OR: [
                         { visibility: MaterialVisibility.All },
-                        { visibility: MaterialVisibility.Group, groupId: user.auctionGroupId },
+                        { visibility: MaterialVisibility.Group, groupId: user.userGroupId },
                     ],
                 },
                 {
@@ -147,7 +148,7 @@ export class TrainingService {
         if (!material) throw new NotFoundException('Матеріал не знайдено');
 
         if (user.role !== Roles.SuperAdmin && material.visibility === MaterialVisibility.Group) {
-            if (material.groupId !== user.auctionGroupId) {
+            if (material.groupId !== user.userGroupId) {
                 throw new ForbiddenException('У вас немає доступу до цього матеріалу');
             }
         }
@@ -157,7 +158,7 @@ export class TrainingService {
 
     async createTrainingMaterial(user: User, data: CreateTrainingDto) {
         const isSuperAdmin = user.role === Roles.SuperAdmin;
-        const AdminInfo = await this.prisma.auctionGroup.findUnique({
+        const AdminInfo = await this.prisma.userGroup.findUnique({
             where: { AdminId: user.id }
         });
         const isAdmin = !!AdminInfo;

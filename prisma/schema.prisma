@@ -76,20 +76,22 @@ model User {
   lastLogin                DateTime?
   lastActivity             DateTime?
   refreshTokens            RefreshToken[]
-  auctions                 Auction[]                 @relation("UserAuctions")
   session                  Session?                  @relation(fields: [sessionId], references: [id])
   sessionId                String?                   @db.Uuid()
   resetTokens              ResetToken[]
-  auctionGroup             AuctionGroup?             @relation("GroupParticipants", fields: [auctionGroupId], references: [id])
-  auctionGroupId           String?                   @db.Uuid()
-  managedGroup             AuctionGroup?             @relation("Administrator")
+  userGroup                UserGroup?                @relation("GroupParticipants", fields: [userGroupId], references: [id])
+  userGroupId              String?                   @db.Uuid()
+  managedGroup             UserGroup?                @relation("Administrator")
   userNotificationSettings UserNotificationSetting[]
   notifications            Notification[]
   trainingMaterials        TrainingMaterial[]
   terminatedSessions       Session[]                 @relation("SessionTerminator")
   sessionLogs              SessionLog[]
-  accessibleGroupAccounts  AuctionGroup[]            @relation("GroupAccountAccess")
-  selectedAccounts         AuctionAuth[]
+  selectedAccounts         AuctionAuth[]             @relation("UserSelectedAccounts")
+  personalAuctionGroups    AuctionGroup[]            @relation("UserPersonalAuctionGroups")
+  personalAuctions         Auction[]                 @relation("UserPersonalAuctions")
+  personalAccounts         AuctionAuth[]             @relation("UserPersonalAccounts")
+  deniedAccounts           AuctionAuth[]             @relation("UserDeniedAccounts")
 
   @@map("users")
 }
@@ -118,8 +120,8 @@ model TrainingMaterial {
   authorId String @db.Uuid()
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
-  groupId String?       @db.Uuid()
-  group   AuctionGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId String?    @db.Uuid()
+  group   UserGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -159,7 +161,7 @@ model UserNotificationSetting {
 model GroupNotificationRequirement {
   id                 String           @id @default(uuid()) @db.Uuid()
   groupId            String           @db.Uuid()
-  group              AuctionGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group              UserGroup        @relation(fields: [groupId], references: [id], onDelete: Cascade)
   notificationTypeId String           @db.Uuid()
   notificationType   NotificationType @relation(fields: [notificationTypeId], references: [id])
 
@@ -204,8 +206,11 @@ model AuctionAuth {
   auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   sessions Session[]
-  user     User?     @relation(fields: [userId], references: [id])
-  userId   String?   @db.Uuid()
+
+  allowedForUserGroups UserGroup[] @relation("UserGroupAllowedAccounts")
+  allowedForUsers      User[]      @relation("UserPersonalAccounts")
+  deniedForUsers       User[]      @relation("UserDeniedAccounts")
+  selectedByUsers      User[]      @relation("UserSelectedAccounts")
 
   @@map("auction_auths")
 }
@@ -243,7 +248,6 @@ model Auction {
   id                 String              @id @default(uuid()) @db.Uuid()
   title              String
   url                String
-  users              User[]              @relation("UserAuctions")
   sessions           Session[]
   auctionAuths       AuctionAuth[]
   auctionGroup       AuctionGroup?       @relation(fields: [auctionGroupId], references: [id])
@@ -251,6 +255,8 @@ model Auction {
   allowedRoutes      AllowedRoute[]
   forbiddenSelectors ForbiddenSelector[]
   forbiddenRoutes    ForbiddenRoute[]
+  allowedForGroups   UserGroup[]         @relation("UserGroupAllowedAuctions")
+  allowedForUsers    User[]              @relation("UserPersonalAuctions")
 
   @@map("auctions")
 }
@@ -259,28 +265,43 @@ model AuctionGroup {
   id    String @id @default(uuid()) @db.Uuid()
   title String
 
-  isActive Boolean
-
-  sessionLimit        Int     @default(0)
-  canGaManageAccounts Boolean @default(false)
-  showAccounts        Boolean @default(true)
-  rules               Json?   @default("{}")
-  accounts            User[]  @relation("GroupAccountAccess")
+  sessionLimit Int @default(0)
 
   auctions Auction[]
   sessions Session[]
+
+  allowedForUserGroups UserGroup[] @relation("UserGroupAllowedAuctionGroups")
+  allowedForUsers      User[]      @relation("UserPersonalAuctionGroups")
+
+  @@map("auction_groups")
+}
+
+model UserGroup {
+  id   String @id @default(uuid()) @db.Uuid()
+  name String
+
+  isActive Boolean @default(true)
+
+  canGaManageAccounts Boolean @default(false)
+  showAccounts        Boolean @default(true)
+  rules               Json?   @default("{}")
 
   lastActivity DateTime?
 
   users                User[]   @relation("GroupParticipants")
   allowedProfileFields String[] @default(["firstName", "lastName", "phone", "city"])
 
-  AdminId                       String?                        @unique @db.Uuid()
-  Admin                         User?                          @relation("Administrator", fields: [AdminId], references: [id])
+  allowedAuctions Auction[] @relation("UserGroupAllowedAuctions")
+
+  AdminId String? @unique @db.Uuid()
+  Admin   User?   @relation("Administrator", fields: [AdminId], references: [id])
+
   groupNotificationRequirements GroupNotificationRequirement[]
   trainingMaterials             TrainingMaterial[]
+  allowedAuctionGroups          AuctionGroup[]                 @relation("UserGroupAllowedAuctionGroups")
+  allowedAccounts               AuctionAuth[]                  @relation("UserGroupAllowedAccounts")
 
-  @@map("auction_groups")
+  @@map("user_groups")
 }
 
 model AllowedRoute {

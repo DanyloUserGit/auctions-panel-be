@@ -1,0 +1,17 @@
+# Isolated infrastructure for the access e2e tests (npm run test:e2e:access).
+# Uses non-default ports so it never collides with the dev stack; Postgres data lives in memory.
+services:
+  postgres-test:
+    image: postgres:14-alpine
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: auctions_e2e_test
+    ports:
+      - "55440:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  rabbitmq-test:
+    image: rabbitmq:3-alpine
+    ports:
+      - "55672:5672"

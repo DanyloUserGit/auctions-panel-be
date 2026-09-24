@@ -1,0 +1,12 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": "access/.*\\.e2e-spec\\.ts$",
+  "setupFiles": ["<rootDir>/access/env.ts"],
+  "testTimeout": 60000,
+  "forceExit": true,
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  }
+}

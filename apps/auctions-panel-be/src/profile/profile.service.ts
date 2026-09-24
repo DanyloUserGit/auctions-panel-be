@@ -36,10 +36,10 @@ export class ProfileService {
       if (!isAdmin) {
         const currentUser = await this.prismaService.user.findUnique({
           where: { id: user.id },
-          select: { auctionGroup: { select: { allowedProfileFields: true } } }
+          select: { userGroup: { select: { allowedProfileFields: true } } }
         });
 
-        const allowedFields = currentUser?.auctionGroup?.allowedProfileFields || [];
+        const allowedFields = currentUser?.userGroup?.allowedProfileFields || [];
 
         dataToUpdate = Object.keys(dataToUpdate).reduce((acc, key) => {
           if (allowedFields.includes(key)) {

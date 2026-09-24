@@ -1,11 +1,11 @@
 export class NotificationContentDto {
-    subject: string;
-    body: string;
+    subject!: string;
+    body!: string;
 }
 
 export class CreateNotificationDto {
-    userId: string;
-    typeName: string;
-    content: NotificationContentDto;
+    userId!: string;
+    typeName!: string;
+    content!: NotificationContentDto;
     sendEmail?: boolean;
 }

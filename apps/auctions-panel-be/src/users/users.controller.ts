@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -7,10 +7,24 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { Public } from '../decorators/public.decorator';
+import { Roles } from '@prisma/client';
+import { RolesGuard } from '../auth/roles.guard';
+import { RolesDecorator } from '../decorators/roles.decorator';
+import { AddAccountSchema, AddAccountSwaggerDto, type AddAccountDto } from '../user-groups/dto/add-account.dto';
+import {
+  AddAuctionGroupSchema,
+  AddAuctionGroupSwaggerDto,
+  type AddAuctionGroupDto,
+} from '../user-groups/dto/add-auction-group.dto';
+import { AddAuctionSchema, AddAuctionSwaggerDto, type AddAuctionDto } from '../user-groups/dto/add-auction.dto';
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
 import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
+import {
+  UpdateUserStatusSchema,
+  UpdateUserStatusSwaggerDto,
+  type UpdateUserStatusDto,
+} from './dto/update-user-status.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -28,8 +42,9 @@ export class UsersController {
     return this.usersService.searchUsers(dto, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Post()
-  @Public()
   @ApiBody({ type: CreateUserSwaggerDto })
   @ApiCreatedResponse({
     description: 'User successfully created',
@@ -47,11 +62,7 @@ export class UsersController {
   })
   create(@Body() createUserDto: CreateUserDto, @Req() req) {
     const data = CreateUserSchema.parse(createUserDto);
-    if (req.user) {
-      return this.usersService.create(data, req.user);
-    } else {
-      return this.usersService.create(data);
-    }
+    return this.usersService.create(data, req.user);
   }
 
   @Get()
@@ -63,8 +74,8 @@ export class UsersController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req) {
+    return this.usersService.findOneForRequester(id, req.user);
   }
 
   @Patch(':id')
@@ -83,9 +94,9 @@ export class UsersController {
       ],
     },
   })
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto, @Req() req) {
     const data = UpdateUserSchema.parse(updateUserDto);
-    return this.usersService.update(id, data);
+    return this.usersService.update(id, data, req.user);
   }
 
   @Get(':id/control-card')
@@ -94,14 +105,104 @@ export class UsersController {
     return this.usersService.getUserControlCard(id, req.user);
   }
 
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Patch(':id/status')
   @ApiOperation({ summary: 'Зміна статусу/блокування користувача' })
-  async updateStatus(@Param('id') id: string, @Body() statusDto: { isBlocked: boolean, isActive: boolean }) {
-    return this.usersService.updateUserStatus(id, statusDto);
+  @ApiBody({ type: UpdateUserStatusSwaggerDto })
+  async updateStatus(@Param('id') id: string, @Body() statusDto: UpdateUserStatusDto, @Req() req) {
+    const data = UpdateUserStatusSchema.parse(statusDto);
+    return this.usersService.updateUserStatus(id, data, req.user);
   }
 
+  // --- Особисті дозволи користувача (власний ланцюг доступу) ---
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Get(':id/access')
+  @ApiOperation({ summary: 'Особисті дозволи користувача (групи аукціонів / аукціони / акаунти)' })
+  getPersonalAccess(@Param('id') id: string, @Req() req) {
+    return this.usersService.getPersonalAccess(id, req.user);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Post(':id/add-auction-group')
+  @ApiBody({ type: AddAuctionGroupSwaggerDto })
+  addPersonalAuctionGroup(@Param('id') id: string, @Body() body: AddAuctionGroupDto) {
+    const data = AddAuctionGroupSchema.parse(body);
+    return this.usersService.setPersonalAccess(id, 'auctionGroup', data.auctionGroupId, true);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Delete(':id/remove-auction-group')
+  @ApiBody({ type: AddAuctionGroupSwaggerDto })
+  removePersonalAuctionGroup(@Param('id') id: string, @Body() body: AddAuctionGroupDto) {
+    const data = AddAuctionGroupSchema.parse(body);
+    return this.usersService.setPersonalAccess(id, 'auctionGroup', data.auctionGroupId, false);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Post(':id/add-auction')
+  @ApiBody({ type: AddAuctionSwaggerDto })
+  addPersonalAuction(@Param('id') id: string, @Body() body: AddAuctionDto) {
+    const data = AddAuctionSchema.parse(body);
+    return this.usersService.setPersonalAccess(id, 'auction', data.auctionId, true);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Delete(':id/remove-auction')
+  @ApiBody({ type: AddAuctionSwaggerDto })
+  removePersonalAuction(@Param('id') id: string, @Body() body: AddAuctionDto) {
+    const data = AddAuctionSchema.parse(body);
+    return this.usersService.setPersonalAccess(id, 'auction', data.auctionId, false);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Post(':id/add-account')
+  @ApiBody({ type: AddAccountSwaggerDto })
+  addPersonalAccount(@Param('id') id: string, @Body() body: AddAccountDto) {
+    const data = AddAccountSchema.parse(body);
+    return this.usersService.setPersonalAccess(id, 'account', data.accountId, true);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.SuperAdmin)
+  @Delete(':id/remove-account')
+  @ApiBody({ type: AddAccountSwaggerDto })
+  removePersonalAccount(@Param('id') id: string, @Body() body: AddAccountDto) {
+    const data = AddAccountSchema.parse(body);
+    return this.usersService.setPersonalAccess(id, 'account', data.accountId, false);
+  }
+
+  // --- Заборона учаснику окремих акаунтів групи (canGaManageAccounts) ---
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Post(':id/deny-account')
+  @ApiBody({ type: AddAccountSwaggerDto })
+  denyAccount(@Param('id') id: string, @Body() body: AddAccountDto, @Req() req) {
+    const data = AddAccountSchema.parse(body);
+    return this.usersService.setDeniedAccount(id, data.accountId, true, req.user);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Delete(':id/deny-account')
+  @ApiBody({ type: AddAccountSwaggerDto })
+  undenyAccount(@Param('id') id: string, @Body() body: AddAccountDto, @Req() req) {
+    const data = AddAccountSchema.parse(body);
+    return this.usersService.setDeniedAccount(id, data.accountId, false, req.user);
+  }
+
+  @UseGuards(RolesGuard)
+  @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  remove(@Param('id') id: string, @Req() req) {
+    return this.usersService.remove(id, req.user);
   }
 }

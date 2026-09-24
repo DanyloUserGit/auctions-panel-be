@@ -27,6 +27,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { OrdersModule } from './orders/orders.module';
 import { InStockModule } from './in-stock/in-stock.module';
 import { WonCarsModule } from './won-cars/won-cars.module';
+import { UserGroupsModule } from './user-groups/user-groups.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { WonCarsModule } from './won-cars/won-cars.module';
     OrdersModule,
     InStockModule,
     WonCarsModule,
+    UserGroupsModule,
   ],
   providers: [
     {
