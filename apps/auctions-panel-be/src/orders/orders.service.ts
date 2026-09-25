@@ -1,109 +1,92 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { User } from '@prisma/client';
-import { ExternalDbManager } from '../client-db/client-db.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { CLIENT_DB, ExternalDbManager } from '../client-db/client-db.service';
+import { CrmScopeService, type CrmUser } from '../client-db/crm-scope.service';
+import { CreateOrderDto, ORDER_COLUMNS } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 
+// Замовлення (ТЗ 13.1): User бачить і змінює лише свої, GA - своєї групи, SuperAdmin - усі.
+// Власник зберігається в car_orders.user (ID користувача платформи).
 @Injectable()
 export class OrdersService {
-    constructor(private readonly dbManager: ExternalDbManager) { }
-    async findAll(dbName: string, user: User, search?: string) {
-        if (!user) {
-            throw new BadRequestException();
-        }
+    constructor(
+        private readonly dbManager: ExternalDbManager,
+        private readonly scope: CrmScopeService,
+    ) { }
 
-        const pool = await this.dbManager.getConnection(dbName);
+    private pool() {
+        return this.dbManager.getConnection(CLIENT_DB.main);
+    }
 
-        let sql = 'SELECT * FROM car_orders';
-        const params: any[] = [];
+    // Лише відомі колонки (ORDER_COLUMNS) і лише задані значення.
+    private columns(dto: UpdateOrderDto) {
+        return ORDER_COLUMNS.filter((key) => dto[key] !== undefined);
+    }
 
-        if (user.role !== 'SuperAdmin') {
-            sql += ' WHERE user = ?';
-            params.push(user.id);
+    async findAll(user: CrmUser, search?: string) {
+        const pool = await this.pool();
+        const owners = await this.scope.ownerIds(user);
+
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (owners) {
+            conditions.push(`\`user\` IN (${owners.map(() => '?').join(', ')})`);
+            params.push(...owners);
         }
 
         if (search) {
-            const searchCondition = `
-            (
-                brand_names LIKE ?
-                OR model_names LIKE ?
-                OR car_number LIKE ?
-            )
-        `;
-
-            sql += user.role === 'SuperAdmin'
-                ? ` WHERE ${searchCondition}`
-                : ` AND ${searchCondition}`;
-
+            conditions.push('(brand_names LIKE ? OR model_names LIKE ? OR internal_id LIKE ? OR phone LIKE ? OR last_name LIKE ?)');
             const searchParam = `%${search}%`;
-            params.push(searchParam, searchParam, searchParam);
+            params.push(searchParam, searchParam, searchParam, searchParam, searchParam);
         }
 
-        sql += ' ORDER BY id DESC';
-
-        const [rows] = await pool.query(sql, params);
-
+        const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+        const [rows] = await pool.query(`SELECT * FROM car_orders${where} ORDER BY id DESC`, params);
         return rows;
-    } 
+    }
 
-    async findOne(dbName: string, id: number) {
-        const pool = await this.dbManager.getConnection(dbName);
+    // Замовлення поза областю видимості користувача - так само «не знайдено», як і неіснуюче.
+    async findOne(id: number, user: CrmUser) {
+        const pool = await this.pool();
         const [rows]: any = await pool.query('SELECT * FROM car_orders WHERE id = ?', [id]);
+        const order = rows?.[0];
 
-        if (!rows || rows.length === 0) {
+        if (!order || !(await this.scope.canAccessOwner(user, order.user))) {
             throw new NotFoundException(`Замовлення з ID ${id} не знайдено`);
         }
-        return rows[0];
+        return order;
     }
 
-    async create(dbName: string, createOrderDto: CreateOrderDto, user: User) {
-        const pool = await this.dbManager.getConnection(dbName);
+    async create(dto: CreateOrderDto, user: CrmUser) {
+        const pool = await this.pool();
+        const keys = this.columns(dto);
+        const columns = ['`user`', ...keys.map((k) => `\`${k}\``)];
+        const values = [user.id, ...keys.map((k) => dto[k])];
 
-        const dataToInsert = { ...createOrderDto, user: user.id };
-
-        if (dataToInsert['updated_at']) {
-            dataToInsert['updated_at'] = new Date(dataToInsert['updated_at'])
-                .toISOString()
-                .slice(0, 19)
-                .replace('T', ' ');
-        }
-
-        const keys = Object.keys(dataToInsert);
-        const values = Object.values(dataToInsert);
-
-        const placeholders = keys.map(() => '?').join(', ');
-        const sql = `INSERT INTO car_orders (${keys.join(', ')}) VALUES (${placeholders})`;
-
-        const [result]: any = await pool.query(sql, values);
-        return this.findOne(dbName, result.insertId);
+        const [result]: any = await pool.query(
+            `INSERT INTO car_orders (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+            values,
+        );
+        return this.findOne(result.insertId, user);
     }
 
-    async update(dbName: string, id: number, updateOrderDto: UpdateOrderDto) {
-        const pool = await this.dbManager.getConnection(dbName);
+    async update(id: number, dto: UpdateOrderDto, user: CrmUser) {
+        await this.findOne(id, user);
 
-        const dataToUpdate = { ...updateOrderDto };
+        const keys = this.columns(dto);
+        if (keys.length === 0) return this.findOne(id, user);
 
-        if (dataToUpdate['updated_at']) {
-            dataToUpdate['updated_at'] = new Date(dataToUpdate['updated_at'])
-                .toISOString()
-                .slice(0, 19)
-                .replace('T', ' ');
-        }
-
-        const keys = Object.keys(dataToUpdate);
-
-        if (keys.length === 0) return this.findOne(dbName, id);
-
-        const setClause = keys.map(key => `${key} = ?`).join(', ');
-        const values = [...Object.values(dataToUpdate), id];
-
-        const sql = `UPDATE car_orders SET ${setClause} WHERE id = ?`;
-        await pool.query(sql, values);
-
-        return this.findOne(dbName, id);
+        const pool = await this.pool();
+        await pool.query(
+            `UPDATE car_orders SET ${keys.map((k) => `\`${k}\` = ?`).join(', ')} WHERE id = ?`,
+            [...keys.map((k) => dto[k]), id],
+        );
+        return this.findOne(id, user);
     }
-    async remove(dbName: string, id: number) {
-        const pool = await this.dbManager.getConnection(dbName);
+
+    async remove(id: number, user: CrmUser) {
+        await this.findOne(id, user);
+        const pool = await this.pool();
         await pool.query('DELETE FROM car_orders WHERE id = ?', [id]);
         return { success: true };
     }

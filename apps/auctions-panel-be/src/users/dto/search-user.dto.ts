@@ -1,43 +1,16 @@
-import { IsOptional, IsString, IsInt, Min } from 'class-validator';
-import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Rights, Roles } from '@prisma/client';
+import { ApiProperty } from '@nestjs/swagger';
+import { z } from 'zod';
+import { AccessStatus, Roles } from '@prisma/client';
 
-export class SearchUserDto {
-  @ApiPropertyOptional({
-    description: 'Search query (firstName, lastName, email)',
-    example: 'ivan',
-  })
-  @IsOptional()
-  @IsString()
-  query?: string;
+export const SearchUserSchema = z.object({
+  query: z.string().trim().optional(),
+  role: z.nativeEnum(Roles).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(200).default(10),
+});
 
-  @IsOptional()
-  @IsString()
-  role?: string;
+export type SearchUserDto = z.infer<typeof SearchUserSchema>;
 
-  @ApiPropertyOptional({
-    description: 'Page number',
-    example: 1,
-    default: 1,
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @ApiPropertyOptional({
-    description: 'Items per page',
-    example: 10,
-    default: 10,
-  })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 10;
-}
 export class UserResponseDto {
   @ApiProperty({ example: 'uuid' })
   id: string;
@@ -54,8 +27,8 @@ export class UserResponseDto {
   @ApiProperty({ enum: Roles })
   role: Roles;
 
-  @ApiProperty({ enum: Rights })
-  rights: Rights;
+  @ApiProperty({ enum: AccessStatus })
+  accessStatus: AccessStatus;
 }
 export class PaginationMetaDto {
   @ApiProperty({ example: 100 })

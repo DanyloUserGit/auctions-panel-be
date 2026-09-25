@@ -1,9 +1,14 @@
-import { Module } from '@nestjs/common';
-import { AuditLogService } from './audit-log.service';
+import { Global, Module } from '@nestjs/common';
+import { PrismaModule } from '../prisma/prisma.module';
 import { AuditLogController } from './audit-log.controller';
+import { AuditLogService } from './audit-log.service';
 
+// Глобальний: журнал аудиту пишуть майже всі модулі адміністрування.
+@Global()
 @Module({
+  imports: [PrismaModule],
   providers: [AuditLogService],
-  controllers: [AuditLogController]
+  controllers: [AuditLogController],
+  exports: [AuditLogService],
 })
 export class AuditLogModule {}

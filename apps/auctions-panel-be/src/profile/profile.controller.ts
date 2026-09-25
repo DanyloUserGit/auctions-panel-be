@@ -1,3 +1,4 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Body, Controller, Param, Patch, Post, Req } from '@nestjs/common';
 import { ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 import { MailService } from '../mail/mail.service';
@@ -21,6 +22,7 @@ export class ProfileController {
     private mailService: MailService
   ) {}
 
+  @Audit('profile.update', 'Змінено профіль {body.id}')
   @Patch('edit')
   @ApiCreatedResponse({
     description: 'Профіль успішно оновлено',
@@ -33,6 +35,7 @@ export class ProfileController {
     return this.profileService.editProfile(req.user, data);
   }
 
+  @Audit('user.role', 'Роль користувача {body.id} змінено на {body.role}')
   @Patch('change-role')
   @ApiCreatedResponse({
     description: 'Профіль успішно оновлено',
@@ -45,6 +48,7 @@ export class ProfileController {
     return this.profileService.changeRole(req.user, data);
   }
 
+  @Audit('profile.password', 'Змінено пароль (через посилання зі скидання)')
   @Patch('change-password/:tokenId')
   changePassword(@Req() req, @Body() dto: ChangePasswordDto, @Param('tokenId') tokenId: string) {
     const data = ChangePasswordSchema.parse(dto);

@@ -1,17 +1,25 @@
-import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { NotificationChannel, NotificationConfigType, Prisma, Roles } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { managedGroupIdOf, managedGroupWhere } from '../users/managed-group';
 import { NotificationGateway } from './notification.gateway';
 
 
 @Injectable()
-export class NotificationService {
+export class NotificationService implements OnModuleInit {
+    private readonly logger = new Logger(NotificationService.name);
+
     constructor(
         private prisma: PrismaService,
         private mailService: MailService,
         private readonly gateway: NotificationGateway
     ) { }
+    // Типи сповіщень завжди є в базі (раніше їх створював лише ручний виклик /notifications/seed).
+    async onModuleInit() {
+        await this.seedNotificationTypes().catch((error) => this.logger.error('Не вдалося засіяти типи сповіщень', error));
+    }
+
     private getDefaultValue(setting: Prisma.JsonValue | null): number {
         if (
             setting &&
@@ -80,6 +88,9 @@ export class NotificationService {
             throw new UnauthorizedException("Користувача не знайдено");
         }
 
+        // Налаштування для типів, що з'явилися після створення користувача.
+        await this.initializeDefaultSettings(userId);
+
         const [settings, mandatoryTypeIds] = await Promise.all([
             this.prisma.userNotificationSetting.findMany({
                 where: {
@@ -100,148 +111,98 @@ export class NotificationService {
             isMandatory: mandatoryTypeIds.has(setting.notificationTypeId)
         }));
     }
-    private async notifyUser(
-        userId: string,
-        typeName: string,
-        content: {
-            subject: string;
-            body: string;
-        },
-        sendEmail = true
-    ) {
-
-        const setting = await this.prisma.userNotificationSetting.findFirst({
-            where: {
-                userId,
-                notificationType: {
-                    name: typeName
-                }
-            },
-            include: {
-                user: true
-            }
-        });
-
-        if (!setting || !setting.isEnabled) {
-            return;
+    // Чи користувач зараз у системі (відкрита вкладка панелі). Email потрібен лише офлайн-користувачам (ТЗ 15).
+    private async isOnline(userId: string) {
+        try {
+            return (await this.gateway.server.in(userId).fetchSockets()).length > 0;
+        } catch {
+            return false;
         }
+    }
 
-        if (setting.channels.includes(NotificationChannel.InApp)) {
+    // Збій пошти не повинен ламати основну дію (створення групи, завершення сесії тощо).
+    private async sendEmail(email: string, subject: string, body: string) {
+        try {
+            await this.mailService.send(email, subject, body);
+        } catch (error) {
+            this.logger.error(`Не вдалося надіслати email ${email}`, error as Error);
+        }
+    }
 
+    private async deliver(
+        user: { id: string; email: string },
+        typeName: string,
+        content: { subject: string; body: string },
+        channels: NotificationChannel[],
+    ) {
+        if (channels.includes(NotificationChannel.InApp)) {
             const notification = await this.prisma.notification.create({
-                data: {
-                    userId,
-                    type: typeName,
-                    message: content.body
-                }
+                data: { userId: user.id, type: typeName, message: content.body },
             });
-
-            this.gateway.sendToUser(userId, notification);
+            this.gateway.sendToUser(user.id, notification);
         }
-
-        if (
-            sendEmail &&
-            setting.channels.includes(NotificationChannel.Email) &&
-            setting.user.email
-        ) {
-            await this.mailService.send(
-                setting.user.email,
-                content.subject,
-                content.body
-            );
-        }
-
-        // Telegram
-        if (setting.channels.includes(NotificationChannel.Telegram) && setting.user.telegramChatId) {
-            // TODO: Розкоментувати після додавання TelegramService
-            // await this.telegramService.sendMessage(setting.user.telegramChatId, content.body);
-        }
-
-        // Viber
-        if (setting.channels.includes(NotificationChannel.Viber) && setting.user.viberId) {
-            // TODO: Розкоментувати після додавання ViberService
-            // await this.viberService.sendMessage(setting.user.viberId, content.body);
+        if (channels.includes(NotificationChannel.Email) && user.email && !(await this.isOnline(user.id))) {
+            await this.sendEmail(user.email, content.subject, content.body);
         }
     }
-    private async sendSystemNotification(
-        userId: string,
-        type: string,
-        content: {
-            subject: string;
-            body: string;
-        }
-    ) {
 
-        const user = await this.prisma.user.findUnique({
-            where: { id: userId }
+    // Налаштовуване сповіщення: за налаштуваннями користувача (увімкнено, канали).
+    private async notifyUser(userId: string, typeName: string, content: { subject: string; body: string }) {
+        const setting = await this.prisma.userNotificationSetting.findFirst({
+            where: { userId, notificationType: { name: typeName } },
+            include: { user: { select: { id: true, email: true } } },
         });
-
-        if (!user) {
-            return;
-        }
-
-        const notification = await this.prisma.notification.create({
-            data: {
-                userId,
-                type,
-                message: content.body
-            }
-        });
-
-        this.gateway.sendToUser(userId, notification);
-
-        if (user.email) {
-            await this.mailService.send(
-                user.email,
-                content.subject,
-                content.body
-            );
-        }
+        if (!setting || !setting.isEnabled) return;
+        await this.deliver(setting.user, typeName, content, setting.channels);
     }
-    async notify(
-        userId: string,
-        typeName: string,
-        content: {
-            subject: string;
-            body: string;
-        },
-        sendEmail = true
-    ) {
 
-        const type = await this.prisma.notificationType.findUnique({
-            where: {
-                name: typeName
-            }
-        });
-
-        if (!type) {
-            return;
-        }
-
-        if (type.configType === 'Configurable') {
-            return this.notifyUser(userId, typeName, content, sendEmail);
-        }
-
+    // Системне сповіщення конкретним отримувачам: у кабінеті завжди, email - якщо отримувач не в системі.
+    async notifyUsers(userIds: string[], typeName: string, content: { subject: string; body: string }) {
         const users = await this.prisma.user.findMany({
-            where: {
-                role: {
-                    in: type.roles
-                }
-            },
-            select: {
-                id: true
-            }
+            where: { id: { in: [...new Set(userIds)] } },
+            select: { id: true, email: true },
         });
-
         await Promise.all(
-            users.map(u =>
-                this.sendSystemNotification(
-                    u.id,
-                    typeName,
-                    content
-                )
-            )
+            users.map((user) => this.deliver(user, typeName, content, [NotificationChannel.InApp, NotificationChannel.Email])),
         );
+    }
+
+    // Налаштовуваний тип - одному користувачу за його налаштуваннями; системний - цьому користувачу.
+    async notify(userId: string, typeName: string, content: { subject: string; body: string }) {
+        const type = await this.prisma.notificationType.findUnique({ where: { name: typeName } });
+        if (!type) return;
+
+        if (type.configType === NotificationConfigType.Configurable) {
+            return this.notifyUser(userId, typeName, content);
+        }
+        return this.notifyUsers([userId], typeName, content);
+    }
+
+    // Критичні помилки воркерів і сесій - усім Super Admin (ТЗ 3, 15).
+    async notifySuperAdmins(typeName: string, content: { subject: string; body: string }) {
+        const admins = await this.prisma.user.findMany({
+            where: { role: Roles.SuperAdmin, isBlocked: false },
+            select: { id: true },
+        });
+        await this.notifyUsers(admins.map((a) => a.id), typeName, content);
+    }
+
+    // Користувача додано до групи - повідомляємо адміністратора саме цієї групи (ТЗ 3, 15).
+    async notifyGroupAdminAboutNewMember(groupId: string, memberIds: string[]) {
+        if (memberIds.length === 0) return;
+        const group = await this.prisma.userGroup.findUnique({ where: { id: groupId }, select: { name: true, AdminId: true } });
+        if (!group?.AdminId) return;
+
+        const members = await this.prisma.user.findMany({
+            where: { id: { in: memberIds }, NOT: { id: group.AdminId } },
+            select: { firstName: true, lastName: true, email: true },
+        });
+        if (members.length === 0) return;
+        const names = members.map((m) => `${m.firstName} ${m.lastName} (${m.email})`).join(', ');
+        await this.notifyUsers([group.AdminId], 'ADDED_TO_GROUP', {
+            subject: 'Новий користувач у вашій групі',
+            body: `До групи «${group.name}» додано: ${names}.`,
+        });
     }
 
     async updateSettings(
@@ -360,7 +321,7 @@ export class NotificationService {
     async setGroupMandatoryRequirement(adminUserId: string, groupId: string, typeId: string, isMandatory: boolean) {
         const group = await this.prisma.userGroup.findUnique({ where: { id: groupId } });
 
-        if (!group || group.AdminId !== adminUserId) {
+        if (!group || (await managedGroupIdOf(this.prisma, adminUserId)) !== group.id) {
             throw new ForbiddenException("Тільки адміністратор групи може змінювати ці налаштування");
         }
 
@@ -383,7 +344,7 @@ export class NotificationService {
     async getGroupRequirements(adminUserId: string, groupId: string) {
         const group = await this.prisma.userGroup.findUnique({ where: { id: groupId } });
 
-        if (!group || group.AdminId !== adminUserId) {
+        if (!group || (await managedGroupIdOf(this.prisma, adminUserId)) !== group.id) {
             throw new ForbiddenException("Тільки адміністратор групи може переглядати ці налаштування");
         }
 
@@ -409,7 +370,7 @@ export class NotificationService {
      */
     async getMyAdminGroups(userId: string) {
         return this.prisma.userGroup.findMany({
-            where: { AdminId: userId },
+            where: managedGroupWhere(userId),
             select: { id: true, name: true }
         });
     }
@@ -418,7 +379,7 @@ export class NotificationService {
         const types = [
             {
                 name: 'AUCTION_ENDED',
-                description: 'Сповіщення про завершення аукціону',
+                description: 'Нагадування про завершення аукціону (за скільки секунд до кінця нагадати)',
                 roles: [Roles.Admin, Roles.SuperAdmin, Roles.User],
                 configType: NotificationConfigType.Configurable,
                 setting: {
@@ -437,6 +398,12 @@ export class NotificationService {
                 name: 'ADDED_TO_GROUP',
                 description: 'Додавання користувача до групи',
                 roles: [Roles.Admin],
+                configType: NotificationConfigType.System
+            },
+            {
+                name: 'SESSION_ENDED',
+                description: 'Сесію завершив адміністратор, таймаут або збій',
+                roles: [Roles.Admin, Roles.SuperAdmin, Roles.User],
                 configType: NotificationConfigType.System
             }
         ];

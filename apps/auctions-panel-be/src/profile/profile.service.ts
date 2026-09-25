@@ -94,7 +94,7 @@ export class ProfileService {
     await this.prismaService.resetToken.deleteMany({ where: { userId: user.id } });
 
     const expiry = new Date();
-    expiry.setMinutes(expiry.getMinutes() + 2);
+    expiry.setMinutes(expiry.getMinutes() + 30);
 
     const tokenRecord = await this.prismaService.resetToken.create({
       data: {
@@ -103,12 +103,14 @@ export class ProfileService {
       },
     });
 
-    const resetLink = `${process.env.HOST || 'http://localhost:8000'}/reset-password/${tokenRecord.id}`;
+    // Посилання веде на фронтенд (сторінка /reset-password/:id), а не на API.
+    const frontend = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const resetLink = `${frontend}/reset-password/${tokenRecord.id}`;
 
     await this.mailService.send(
       user.email,
+      'Зміна паролю',
       `<p>Ваше посилання на зміну пароля: <a href="${resetLink}">${resetLink}</a></p>`,
-      'Зміна паролю'
     );
 
     return { status: 'ok', message: 'Посилання для скидання надіслано' };

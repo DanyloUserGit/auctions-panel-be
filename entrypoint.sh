@@ -6,7 +6,7 @@ if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
 fi
 
-echo "DATABASE_URL is set to: $DATABASE_URL"
+# DATABASE_URL містить пароль - не друкуємо його в лог.
 
 echo "Running database migrations..."
 DATABASE_URL=$DATABASE_URL npx prisma migrate deploy --schema=./prisma/schema.prisma

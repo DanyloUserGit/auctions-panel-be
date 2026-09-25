@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { AuditInterceptor } from './audit-log/audit.interceptor';
+import { AppExceptionFilter } from './utils/http-exception.filter';
 import { JwtModule } from '@nestjs/jwt';
 import { StringValue } from 'ms';
 import { AuctionAuthModule } from './auction-auth/auction-auth.module';
@@ -28,6 +30,10 @@ import { OrdersModule } from './orders/orders.module';
 import { InStockModule } from './in-stock/in-stock.module';
 import { WonCarsModule } from './won-cars/won-cars.module';
 import { UserGroupsModule } from './user-groups/user-groups.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { CrmClientsModule } from './crm-clients/crm-clients.module';
+import { AccessRulesModule } from './access-rules/access-rules.module';
+import { ClientsModule } from './clients/clients.module';
 
 @Module({
   imports: [
@@ -68,11 +74,23 @@ import { UserGroupsModule } from './user-groups/user-groups.module';
     InStockModule,
     WonCarsModule,
     UserGroupsModule,
+    UploadsModule,
+    CrmClientsModule,
+    AccessRulesModule,
+    ClientsModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_FILTER,
+      useClass: AppExceptionFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor,
     },
   ],
 })

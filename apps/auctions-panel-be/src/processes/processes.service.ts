@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { ExternalDbManager } from '../client-db/client-db.service';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { CLIENT_DB, ExternalDbManager } from '../client-db/client-db.service';
 
 @Injectable()
 export class ProcessesService {
@@ -36,8 +36,12 @@ export class ProcessesService {
         return str.split('|').map(u => u.trim()).filter(u => u !== '');
     }
 
-    async getProcesses(dbName: string, options: any) {
-        const db = await this.dbManager.getConnection(dbName);
+    // allowedClients - клієнти, доступні користувачу (null - усі, для SuperAdmin).
+    async getProcesses(allowedClients: string[] | null, options: any) {
+        const emptyStats = { wait_pay: 0, wait_perm: 0, wait_trsp: 0, wait_dauto: 0, wait_cmr: 0, wait_docs: 0, realized: 0, total: 0 };
+        if (allowedClients && allowedClients.length === 0) return { data: [], stats: emptyStats };
+
+        const db = await this.dbManager.getConnection(CLIENT_DB.crm);
         let { clients, showAll, open, asof, search } = options;
 
         asof = (asof && /^\d{4}-\d{2}-\d{2}$/.test(asof)) ? asof : null;
@@ -52,6 +56,12 @@ export class ProcessesService {
 
         const params: any[] = [];
         const conditions: string[] = [];
+
+        // Умова 0: лише клієнти, доступні користувачу
+        if (allowedClients) {
+            conditions.push(`zamovnyk IN (${allowedClients.map(() => '?').join(',')})`);
+            params.push(...allowedClients);
+        }
 
         // Умова 1: Фільтр по клієнтах
         if (!showAll && clients && clients.length > 0) {
@@ -180,4 +190,31 @@ export class ProcessesService {
             stats
         };
     }
+
+    // Зміна етапу процесу (ТЗ 13.5): GA і SA ставлять або прибирають дату етапу в межах доступних клієнтів.
+    async updateStage(allowedClients: string[] | null, id: number, field: ProcessStage, date: string | null) {
+        const db = await this.dbManager.getConnection(CLIENT_DB.crm);
+        const [rows]: any = await db.query('SELECT id, zamovnyk FROM cars_data WHERE id = ?', [id]);
+        const row = rows?.[0];
+        if (!row) throw new NotFoundException('Процес не знайдено');
+        if (allowedClients && !allowedClients.includes(row.zamovnyk)) {
+            throw new ForbiddenException('Цей процес належить клієнту поза вашою групою');
+        }
+        // field - лише зі списку PROCESS_STAGES (перевірено схемою), тож підстановка безпечна.
+        await db.query(`UPDATE cars_data SET \`${field}\` = ? WHERE id = ?`, [date, id]);
+        return { id, field, date };
+    }
 }
+
+// Етапи процесу, які можна змінювати (колонки cars_data з датами).
+export const PROCESS_STAGES = [
+    'data_faktury_zakup',
+    'data_oplaty',
+    'data_zezwolenia',
+    'data_zamowienia_transportu',
+    'data_dostarczenia_auta',
+    'data_wysylki_cmr',
+    'data_dostarczenia_dokumentow',
+    'data_faktury_sprzedaz',
+] as const;
+export type ProcessStage = (typeof PROCESS_STAGES)[number];

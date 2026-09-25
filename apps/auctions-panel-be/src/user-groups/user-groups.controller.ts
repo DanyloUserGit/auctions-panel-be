@@ -1,3 +1,4 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
@@ -44,6 +45,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Audit('group.remove-user', 'Користувача вилучено з групи {params.id}')
   @Patch('remove-user/:id')
   async removeUserFromGroup(
     @Param('id') groupId: string,
@@ -56,6 +58,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Audit('group.block', 'Групу користувачів {params.id} заблоковано')
   @Post(':id/block-group')
   async blockGroup(@Param('id') groupId: string, @Req() req) {
     await this.userGroupsService.assertCanManageGroup(groupId, req.user);
@@ -64,6 +67,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Audit('group.unblock', 'Групу користувачів {params.id} розблоковано')
   @Post(':id/unblock-group')
   async unBlockGroup(@Param('id') groupId: string, @Req() req) {
     await this.userGroupsService.assertCanManageGroup(groupId, req.user);
@@ -72,6 +76,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('access.group.grant', 'Групі {params.id} надано доступ до аукціону {body.auctionId}')
   @Post(':id/add-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
@@ -88,6 +93,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('access.group.revoke', 'Групі {params.id} закрито доступ до аукціону {body.auctionId}')
   @Delete(':id/remove-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
@@ -104,6 +110,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('access.group.grant', 'Групі {params.id} надано доступ до групи аукціонів {body.auctionGroupId}')
   @Post(':id/add-auction-group')
   @ApiBody({ type: AddAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
@@ -120,6 +127,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('access.group.revoke', 'Групі {params.id} закрито доступ до групи аукціонів {body.auctionGroupId}')
   @Delete(':id/remove-auction-group')
   @ApiBody({ type: AddAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
@@ -136,6 +144,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('access.group.grant', 'Групі {params.id} надано доступ до акаунта {body.accountId}')
   @Post(':id/add-account')
   @ApiBody({ type: AddAccountSwaggerDto })
   @ApiCreatedResponse({
@@ -152,6 +161,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('access.group.revoke', 'Групі {params.id} закрито доступ до акаунта {body.accountId}')
   @Delete(':id/remove-account')
   @ApiBody({ type: AddAccountSwaggerDto })
   @ApiCreatedResponse({
@@ -168,6 +178,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('group.create', 'Створено групу користувачів «{result.name}»')
   @Post()
   @ApiBody({ type: CreateUserGroupSwaggerDto })
   @ApiCreatedResponse({
@@ -201,6 +212,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Audit('group.update', 'Змінено налаштування групи користувачів «{result.name}»')
   @Patch(':id')
   @ApiBody({ type: CreateUserGroupSwaggerDto })
   @ApiCreatedResponse({
@@ -225,6 +237,7 @@ export class UserGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('group.delete', 'Видалено групу користувачів «{result.name}»')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.userGroupsService.remove(id);

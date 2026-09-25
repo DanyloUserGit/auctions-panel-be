@@ -11,9 +11,9 @@ export class AuthController {
 
   @Public()
   @Post('login')
-  async login(@Res({ passthrough: true }) res: Response, @Body() body: LoginDto) {
+  async login(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: LoginDto) {
     const data = LoginSchema.parse(body);
-    const tokens = await this.authService.login(data);
+    const tokens = await this.authService.login(data, req.ip);
 
     res.cookie('access_token', tokens.accessToken, {
       httpOnly: true,
@@ -60,7 +60,7 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const refreshToken = req.cookies['refresh_token'];
 
-    await this.authService.logout(refreshToken);
+    await this.authService.logout(refreshToken, req.ip);
 
     res.clearCookie('access_token', {
       httpOnly: true,

@@ -1,10 +1,11 @@
+// .env має бути завантажений до імпорту модулів: декоратори (CORS сокетів) читають його під час імпорту.
+import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
-import { config } from 'dotenv';
 import { AppModule } from './app.module';
-config();
+import { corsOrigins } from './utils/cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -29,7 +30,7 @@ async function bootstrap() {
   SwaggerModule.setup('/api/docs', app, documentFactory);
 
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://panel.caddyluck.com.ua', 'https://panel.caddyluck.com.ua/'],
+    origin: corsOrigins(),
     credentials: true,
   });
   app.use(cookieParser());

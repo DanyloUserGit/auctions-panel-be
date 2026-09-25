@@ -15,3 +15,28 @@ services:
     image: rabbitmq:3-alpine
     ports:
       - "55672:5672"
+
+  # CRM-бази замовника (лише структура з дампів) для e2e-тестів CRM-модулів.
+  mysql-main-test:
+    image: mariadb:10.5
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: caddylc2_caddycombca
+    ports:
+      - "55306:3306"
+    tmpfs:
+      - /var/lib/mysql
+    volumes:
+      - ./caddylc2_caddycombca.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  mysql-crm-test:
+    image: mariadb:10.5
+    environment:
+      MYSQL_ROOT_PASSWORD: test
+      MYSQL_DATABASE: table_extourcars1
+    ports:
+      - "55307:3306"
+    tmpfs:
+      - /var/lib/mysql
+    volumes:
+      - ./table_extourcars1.sql:/docker-entrypoint-initdb.d/init.sql:ro

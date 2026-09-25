@@ -6,11 +6,12 @@ import { NotificationController } from './notification.controller';
 import { NotificationGateway } from './notification.gateway';
 import { NotificationService } from './notification.service';
 import { NotificationMicroController } from './notification-micro.controller';
+import { RemindersService } from './reminders.service';
 
 @Module({
   // Секрет передається явно у NotificationGateway (JWT_SECRET), як і в JwtStrategy.
   imports: [PrismaModule, MailModule, JwtModule.register({})],
-  providers: [NotificationService, NotificationGateway],
+  providers: [NotificationService, NotificationGateway, RemindersService],
   controllers: [NotificationController, NotificationMicroController],
   exports: [NotificationService]
 })

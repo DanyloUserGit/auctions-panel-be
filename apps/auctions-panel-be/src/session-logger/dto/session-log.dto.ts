@@ -1,5 +1,5 @@
+import { LogSeverity, SessionEventType } from '@prisma/client';
 import { z } from 'zod';
-import { SessionEventType, LogSeverity } from '@prisma/client';
 
 // --- CreateLogDto ---
 export const CreateLogSchema = z.object({
@@ -14,20 +14,24 @@ export const CreateLogSchema = z.object({
 
 export type CreateLogDto = z.infer<typeof CreateLogSchema>;
 
-// --- LogFilterDto ---
+const bool = z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean());
+
+// --- LogFilterDto --- (ТЗ 9: пошук, фільтри, сортування)
 export const LogFilterSchema = z.object({
-  sessionId: z.string().optional(),
-  userId: z.string().optional(), // Додано поле для фільтрації по юзеру
+  sessionId: z.string().uuid().optional(),
+  userId: z.string().uuid().optional(),
+  auctionId: z.string().uuid().optional(),
+  userGroupId: z.string().uuid().optional(),
   eventType: z.nativeEnum(SessionEventType).optional(),
-  isIncident: z.boolean().optional(),
-  search: z.string().optional(),
-  auctionGroupId: z.string().optional(),
-
-  startDate: z.string().datetime().optional(), // Додано початкову дату
-  endDate: z.string().datetime().optional(),   // Додано кінцеву дату
-
-  skip: z.number().int().nonnegative().optional(),
-  take: z.number().int().positive().optional(),
+  isIncident: bool.optional(),
+  // Пошук: текст події, ID сесії, користувач (ім'я/email), аукціон.
+  search: z.string().trim().optional(),
+  startDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+  endDate: z.string().datetime({ offset: true }).or(z.string().date()).optional(),
+  sortBy: z.enum(['time', 'tag']).default('time'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+  skip: z.coerce.number().int().nonnegative().optional(),
+  take: z.coerce.number().int().positive().max(500).optional(),
 });
 
 export type LogFilterDto = z.infer<typeof LogFilterSchema>;

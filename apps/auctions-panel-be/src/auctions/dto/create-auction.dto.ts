@@ -6,6 +6,15 @@ export const CreateAuctionSchema = z.object({
   url: z.url().min(3, { message: 'Посилання на аукціон є обовʼязковим.' }),
 
 
+  // Проксі: http(s)://user:pass@host:port або socks5://host:port; порожній рядок - прибрати проксі.
+  proxyUrl: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^(https?|socks5):\/\/[^\s/]+(:\d+)?\/?$/.test(v), {
+      message: 'Проксі: http(s)://логін:пароль@хост:порт або socks5://хост:порт',
+    })
+    .optional(),
+
   sessions: z.array(z.string().uuid({ message: 'SessionId має бути валідним UUID.' })).optional(),
   auctionGroupId: z
     .string()

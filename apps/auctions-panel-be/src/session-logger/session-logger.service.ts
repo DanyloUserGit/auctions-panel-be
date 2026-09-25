@@ -1,15 +1,42 @@
 import { Injectable } from '@nestjs/common';
-import { SessionEventType, Prisma } from '@prisma/client';
-import { CreateLogDto, LogFilterDto } from './dto/session-log.dto';
+import { LogSeverity, Prisma, SessionEventType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateLogDto, LogFilterDto } from './dto/session-log.dto';
+import { dateRange, DispatcherUser, sessionScope, userTextWhere, UUID_REGEX } from './session-scope';
+
+const SEVERITY_ORDER: Record<LogSeverity, number> = { Info: 0, Warning: 1, Critical: 2 };
+
+// Дії користувачів та заборонені дії журналюються завжди (ТЗ 9), незалежно від політики логування.
+const ALWAYS_LOGGED: SessionEventType[] = [
+    SessionEventType.Navigation,
+    SessionEventType.ButtonClick,
+    SessionEventType.TextInput,
+    SessionEventType.ForbiddenAction,
+];
 
 @Injectable()
 export class SessionLoggerService {
+    private policy: { value: LogSeverity; loadedAt: number } | null = null;
+
     constructor(private readonly prisma: PrismaService) { }
 
+    // «Політика логування» з глобальних налаштувань: мінімальна важливість системних подій (кеш 30 с).
+    private async minSeverity(): Promise<LogSeverity> {
+        if (this.policy && Date.now() - this.policy.loadedAt < 30_000) return this.policy.value;
+        const setting = await this.prisma.systemSetting.findUnique({ where: { key: 'LOGGING_POLICY' } });
+        const value = (setting?.value as LogSeverity) in SEVERITY_ORDER ? (setting!.value as LogSeverity) : LogSeverity.Info;
+        this.policy = { value, loadedAt: Date.now() };
+        return value;
+    }
+
     async logEvent(dto: CreateLogDto) {
-        const user = await this.prisma.user.findFirst({ where: { id: dto.userId } });
-        if(user && dto?.message && dto.message.includes(user.id)){
+        if (!ALWAYS_LOGGED.includes(dto.eventType) && !dto.isIncident) {
+            const severity = dto.severity || LogSeverity.Info;
+            if (SEVERITY_ORDER[severity] < SEVERITY_ORDER[await this.minSeverity()]) return null;
+        }
+
+        const user = dto.userId ? await this.prisma.user.findUnique({ where: { id: dto.userId } }) : null;
+        if (user && dto?.message && dto.message.includes(user.id)) {
             dto.message = dto.message.replaceAll(user.id, `${user.firstName} ${user.lastName} (${user.email})`);
         }
         return this.prisma.sessionLog.create({
@@ -36,59 +63,63 @@ export class SessionLoggerService {
         });
     }
 
-    async getSessionLogs(filters: LogFilterDto) {
-        const where: Prisma.SessionLogWhereInput = {};
+    private where(filters: LogFilterDto, user: DispatcherUser): Prisma.SessionLogWhereInput {
+        const and: Prisma.SessionLogWhereInput[] = [{ session: sessionScope(user) }];
 
-        // Базові фільтри
-        if (filters.sessionId) where.sessionId = filters.sessionId;
-        if (filters.eventType) where.eventType = filters.eventType;
-        if (filters.isIncident !== undefined) where.isIncident = filters.isIncident;
+        if (filters.sessionId) and.push({ sessionId: filters.sessionId });
+        if (filters.eventType) and.push({ eventType: filters.eventType });
+        if (filters.isIncident !== undefined) and.push({ isIncident: filters.isIncident });
+        if (filters.userId) and.push({ userId: filters.userId });
+        if (filters.auctionId) and.push({ session: { auctionId: filters.auctionId } });
+        if (filters.userGroupId) and.push({ user: { userGroupId: filters.userGroupId } });
 
-        // Фільтр по конкретному користувачу (хто зробив дію)
-        if (filters.userId) where.userId = filters.userId;
+        const created = dateRange(filters.startDate, filters.endDate);
+        if (created) and.push({ createdAt: created });
 
-        // Фільтр по датах
-        if (filters.startDate || filters.endDate) {
-            where.createdAt = {};
-            if (filters.startDate) where.createdAt.gte = new Date(filters.startDate);
-            if (filters.endDate) where.createdAt.lte = new Date(filters.endDate);
-        }
-
-        // Пошук по тексту (повідомлення)
         if (filters.search) {
-            where.message = {
-                contains: filters.search,
-                mode: 'insensitive',
-            };
+            const text = filters.search;
+            and.push({
+                OR: [
+                    { message: { contains: text, mode: 'insensitive' } },
+                    ...(UUID_REGEX.test(text) ? [{ sessionId: text }] : []),
+                    { user: userTextWhere(text) },
+                    { session: { auction: { title: { contains: text, mode: 'insensitive' } } } },
+                ],
+            });
         }
+        return { AND: and };
+    }
 
-        if (filters.auctionGroupId) {
-            where.session = {
-                auctionGroupId: filters.auctionGroupId,
-            };
-        }
+    // Стрічка подій з прив'язкою до сесії, користувача, аукціону й акаунта (ТЗ 9).
+    async getSessionLogs(filters: LogFilterDto, user: DispatcherUser) {
+        const orderBy: Prisma.SessionLogOrderByWithRelationInput[] =
+            filters.sortBy === 'tag'
+                ? [{ eventType: filters.sortOrder }, { createdAt: 'desc' }]
+                : [{ createdAt: filters.sortOrder }];
 
         return this.prisma.sessionLog.findMany({
-            where,
-            orderBy: { createdAt: 'desc' },
-            // Перевіряємо та конвертуємо skip/take, якщо вони прийшли як рядки
-            skip: filters.skip ? Number(filters.skip) : 0,
-            take: filters.take ? Number(filters.take) : 50,
+            where: this.where(filters, user),
+            orderBy,
+            skip: filters.skip ?? 0,
+            take: filters.take ?? 50,
             include: {
                 user: { select: { id: true, firstName: true, lastName: true, email: true } },
+                session: {
+                    select: {
+                        id: true,
+                        auction: { select: { id: true, title: true } },
+                        account: { select: { id: true, title: true } },
+                    },
+                },
             },
         });
     }
 
-    async getForbiddenActionsJournal(filters: LogFilterDto) {
-        // Примусово обмежуємо пошук тільки забороненими діями
-        filters.eventType = SessionEventType.ForbiddenAction;
-        return this.getSessionLogs(filters);
+    async getForbiddenActionsJournal(filters: LogFilterDto, user: DispatcherUser) {
+        return this.getSessionLogs({ ...filters, eventType: SessionEventType.ForbiddenAction }, user);
     }
 
-    async getIncidentsJournal(filters: LogFilterDto) {
-        // Примусово обмежуємо пошук тільки інцидентами
-        filters.isIncident = true;
-        return this.getSessionLogs(filters);
+    async getIncidentsJournal(filters: LogFilterDto, user: DispatcherUser) {
+        return this.getSessionLogs({ ...filters, isIncident: true }, user);
     }
 }

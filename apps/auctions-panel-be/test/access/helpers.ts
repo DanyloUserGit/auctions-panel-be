@@ -108,7 +108,7 @@ function emitJoin(socket: ReturnType<typeof io>, payload: JoinPayload): Promise<
     };
     const timer = setTimeout(() => done({ type: 'timeout' }), 20000);
     socket.on('session_ready', (d: { sessionId: string }) => done({ type: 'ready', sessionId: d.sessionId }));
-    socket.on('error', (e: { message?: string }) => done({ type: 'error', message: e?.message ?? 'unknown error' }));
+    socket.on('session_error', (e: { message?: string }) => done({ type: 'error', message: e?.message ?? 'unknown error' }));
     socket.emit('join_auction', { width: 800, height: 600, ...payload });
   });
 }

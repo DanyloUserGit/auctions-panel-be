@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma, Roles } from '@prisma/client';
 import { accountSelectFor } from '../auction-auth/auction-auth.select';
 import { PrismaService } from '../prisma/prisma.service';
+import { managedGroupWhere } from '../users/managed-group';
 
 export type AccessUser = { id: string; role: Roles };
 
@@ -83,8 +84,8 @@ export class AccessService {
 
   private async getUserGroup(user: AccessUser) {
     return user.role === Roles.Admin
-      ? this.prisma.userGroup.findUnique({
-        where: { AdminId: user.id },
+      ? this.prisma.userGroup.findFirst({
+        where: managedGroupWhere(user.id),
         select: { id: true, isActive: true, showAccounts: true },
       })
       : (

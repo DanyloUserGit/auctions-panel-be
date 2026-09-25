@@ -1,27 +1,18 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
 import axios from 'axios';
 import * as crypto from 'crypto';
-import { NotificationService } from '../notification/notification.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { UsersService } from '../users/users.service';
 import { verifyPassword } from '../utils/password';
 import type { LoginDto } from './dto/LoginDto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
     private jwtService: JwtService,
     private prisma: PrismaService,
-    private notificationService: NotificationService
+    private auditLog: AuditLogService,
   ) { }
 
   async verifyTurnstileToken(token: string) {
@@ -32,39 +23,41 @@ export class AuthService {
         response: token,
       },
     );
-    console.log(response.data);
     if (!response.data.success) {
       throw new ForbiddenException('Капча не пройдена або застаріла');
     }
   }
 
-  async validateUser(email: string, password: string): Promise<User> {
-    const user = await this.usersService.findOneByEmail(email);
+  // Однакова відповідь для невідомого email і неправильного пароля: не видаємо, які email зареєстровані.
+  private static readonly INVALID_CREDENTIALS = 'Невірний email або пароль';
 
-    if (!user) throw new BadRequestException('Користувача не знайдено');
-
-    const isMatch = await verifyPassword(password, user.password);
-    if (!isMatch) throw new BadRequestException('Паролі не співпадають');
-
-    return user;
-  }
-
-  async login(user: LoginDto) {
+  async login(user: LoginDto, ip?: string) {
     await this.verifyTurnstileToken(user.token);
 
-    const existing = await this.usersService.findOneByEmail(user.email);
+    const existing = await this.prisma.user.findUnique({
+      where: { email: user.email },
+      omit: { password: false },
+    });
+
+    const fail = async (reason: string, message: string, targetUserId?: string) => {
+      await this.auditLog.auth({
+        action: 'login.failed',
+        targetUserId,
+        message: `Невдалий вхід (${user.email}): ${reason}`,
+        details: { email: user.email, reason },
+        ip,
+      });
+      return new ForbiddenException(message);
+    };
 
     if (!existing) {
-      throw new NotFoundException('Користувача не знайдено');
+      throw await fail('користувача не знайдено', AuthService.INVALID_CREDENTIALS);
     }
-
+    if (!(await verifyPassword(existing.password, user.password))) {
+      throw await fail('неправильний пароль', AuthService.INVALID_CREDENTIALS, existing.id);
+    }
     if (existing.isBlocked) {
-      throw new ForbiddenException('Користувача заблоковано');
-    }
-
-    const isValidPass = await verifyPassword(existing.password, user.password);
-    if (!isValidPass) {
-      throw new ForbiddenException('Паролі не співпадають');
+      throw await fail('користувача заблоковано', 'Користувача заблоковано', existing.id);
     }
 
     const payload = {
@@ -81,12 +74,21 @@ export class AuthService {
 
     const refreshToken = crypto.randomBytes(64).toString('hex');
 
+    const now = new Date();
     await this.prisma.refreshToken.create({
       data: {
         token: refreshToken,
         userId: existing.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
       },
+    });
+    await this.prisma.user.update({ where: { id: existing.id }, data: { lastLogin: now, lastActivity: now } });
+    await this.auditLog.auth({
+      action: 'login.success',
+      actor: existing,
+      targetUserId: existing.id,
+      message: `Вхід: ${existing.firstName} ${existing.lastName} (${existing.email})`,
+      ip,
     });
 
     return { accessToken, refreshToken };
@@ -131,7 +133,7 @@ export class AuthService {
 
     return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
-  async logout(refreshToken: string) {
+  async logout(refreshToken: string, ip?: string) {
     if (!refreshToken) return;
 
     const tokenRecord = await this.prisma.refreshToken.findUnique({
@@ -140,10 +142,13 @@ export class AuthService {
     });
 
     if (tokenRecord) {
-      this.notificationService.notify(tokenRecord.user.id, "USER_LOGED_OUT", {
-        subject: "Новий вхід до системи",
-        body: `Користувач ${tokenRecord.user.firstName} ${tokenRecord.user.lastName} вийшов з системи.`
-      }, false)
+      await this.auditLog.auth({
+        action: 'logout',
+        actor: tokenRecord.user,
+        targetUserId: tokenRecord.user.id,
+        message: `Вихід: ${tokenRecord.user.firstName} ${tokenRecord.user.lastName} (${tokenRecord.user.email})`,
+        ip,
+      });
     }
     await this.prisma.refreshToken.deleteMany({
       where: { token: refreshToken },

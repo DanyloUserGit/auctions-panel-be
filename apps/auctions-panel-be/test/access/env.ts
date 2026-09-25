@@ -11,3 +11,12 @@ process.env.ENCRYPT_PASS = 'e2e-test-encrypt-pass';
 process.env.ENCRYPT_SALT = 'e2e-test-encrypt-salt';
 process.env.SENDGRID_API_KEY = 'SG.e2e-test-disabled';
 process.env.TURNSTILE_SECRET_KEY = 'e2e-test-disabled';
+// CRM-бази з docker-compose.test.yml.
+process.env.DB_CADDYLC2_CADDYCOMBCA_HOST = '127.0.0.1';
+process.env.DB_CADDYLC2_CADDYCOMBCA_PORT = process.env.TEST_MYSQL_MAIN_PORT ?? '55306';
+process.env.DB_CADDYLC2_CADDYCOMBCA_USER = 'root';
+process.env.DB_CADDYLC2_CADDYCOMBCA_PASS = 'test';
+process.env.DB_TABLE_EXTOURCARS1_HOST = '127.0.0.1';
+process.env.DB_TABLE_EXTOURCARS1_PORT = process.env.TEST_MYSQL_CRM_PORT ?? '55307';
+process.env.DB_TABLE_EXTOURCARS1_USER = 'root';
+process.env.DB_TABLE_EXTOURCARS1_PASS = 'test';

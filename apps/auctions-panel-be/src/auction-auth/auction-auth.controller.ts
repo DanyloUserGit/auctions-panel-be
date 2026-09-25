@@ -1,3 +1,4 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
@@ -19,6 +20,7 @@ export class AuctionAuthController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.account.create', 'Створено акаунт аукціону «{result.title}»')
   @Post()
   @ApiBody({ type: CreateAuctionAuthSwaggerDto })
   @ApiCreatedResponse({
@@ -58,6 +60,7 @@ export class AuctionAuthController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.account.update', 'Змінено акаунт аукціону {params.id}')
   @Patch(':id')
   @ApiBody({ type: CreateAuctionAuthSwaggerDto })
   @ApiCreatedResponse({
@@ -78,6 +81,7 @@ export class AuctionAuthController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.account.delete', 'Видалено акаунт аукціону {params.id}')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.auctionAuthService.remove(id);

@@ -18,7 +18,7 @@ import {
 } from '../user-groups/dto/add-auction-group.dto';
 import { AddAuctionSchema, AddAuctionSwaggerDto, type AddAuctionDto } from '../user-groups/dto/add-auction.dto';
 import { CreateUserSchema, CreateUserSwaggerDto, type CreateUserDto } from './dto/create-user.dto';
-import { SearchUserDto, SearchUserResponseDto } from './dto/search-user.dto';
+import { SearchUserResponseDto, SearchUserSchema } from './dto/search-user.dto';
 import { UpdateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import {
   UpdateUserStatusSchema,
@@ -38,8 +38,8 @@ export class UsersController {
     description: 'Users found successfully',
     type: SearchUserResponseDto,
   })
-  async search(@Query() dto: SearchUserDto, @Req() req): Promise<SearchUserResponseDto> {
-    return this.usersService.searchUsers(dto, req.user);
+  async search(@Query() query: unknown, @Req() req): Promise<SearchUserResponseDto> {
+    return this.usersService.searchUsers(SearchUserSchema.parse(query), req.user);
   }
 
   @UseGuards(RolesGuard)
@@ -129,54 +129,54 @@ export class UsersController {
   @RolesDecorator(Roles.SuperAdmin)
   @Post(':id/add-auction-group')
   @ApiBody({ type: AddAuctionGroupSwaggerDto })
-  addPersonalAuctionGroup(@Param('id') id: string, @Body() body: AddAuctionGroupDto) {
+  addPersonalAuctionGroup(@Param('id') id: string, @Body() body: AddAuctionGroupDto, @Req() req) {
     const data = AddAuctionGroupSchema.parse(body);
-    return this.usersService.setPersonalAccess(id, 'auctionGroup', data.auctionGroupId, true);
+    return this.usersService.setPersonalAccess(id, 'auctionGroup', data.auctionGroupId, true, req.user);
   }
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
   @Delete(':id/remove-auction-group')
   @ApiBody({ type: AddAuctionGroupSwaggerDto })
-  removePersonalAuctionGroup(@Param('id') id: string, @Body() body: AddAuctionGroupDto) {
+  removePersonalAuctionGroup(@Param('id') id: string, @Body() body: AddAuctionGroupDto, @Req() req) {
     const data = AddAuctionGroupSchema.parse(body);
-    return this.usersService.setPersonalAccess(id, 'auctionGroup', data.auctionGroupId, false);
+    return this.usersService.setPersonalAccess(id, 'auctionGroup', data.auctionGroupId, false, req.user);
   }
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
   @Post(':id/add-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
-  addPersonalAuction(@Param('id') id: string, @Body() body: AddAuctionDto) {
+  addPersonalAuction(@Param('id') id: string, @Body() body: AddAuctionDto, @Req() req) {
     const data = AddAuctionSchema.parse(body);
-    return this.usersService.setPersonalAccess(id, 'auction', data.auctionId, true);
+    return this.usersService.setPersonalAccess(id, 'auction', data.auctionId, true, req.user);
   }
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
   @Delete(':id/remove-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
-  removePersonalAuction(@Param('id') id: string, @Body() body: AddAuctionDto) {
+  removePersonalAuction(@Param('id') id: string, @Body() body: AddAuctionDto, @Req() req) {
     const data = AddAuctionSchema.parse(body);
-    return this.usersService.setPersonalAccess(id, 'auction', data.auctionId, false);
+    return this.usersService.setPersonalAccess(id, 'auction', data.auctionId, false, req.user);
   }
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
   @Post(':id/add-account')
   @ApiBody({ type: AddAccountSwaggerDto })
-  addPersonalAccount(@Param('id') id: string, @Body() body: AddAccountDto) {
+  addPersonalAccount(@Param('id') id: string, @Body() body: AddAccountDto, @Req() req) {
     const data = AddAccountSchema.parse(body);
-    return this.usersService.setPersonalAccess(id, 'account', data.accountId, true);
+    return this.usersService.setPersonalAccess(id, 'account', data.accountId, true, req.user);
   }
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
   @Delete(':id/remove-account')
   @ApiBody({ type: AddAccountSwaggerDto })
-  removePersonalAccount(@Param('id') id: string, @Body() body: AddAccountDto) {
+  removePersonalAccount(@Param('id') id: string, @Body() body: AddAccountDto, @Req() req) {
     const data = AddAccountSchema.parse(body);
-    return this.usersService.setPersonalAccess(id, 'account', data.accountId, false);
+    return this.usersService.setPersonalAccess(id, 'account', data.accountId, false, req.user);
   }
 
   // --- Заборона учаснику окремих акаунтів групи (canGaManageAccounts) ---

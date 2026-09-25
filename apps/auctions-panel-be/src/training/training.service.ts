@@ -2,56 +2,37 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { MaterialVisibility, Roles, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-import { v2 as cloudinary } from 'cloudinary';
-import * as streamifier from 'streamifier';
+import { UploadsService } from '../uploads/uploads.service';
+import { managedGroupWhere } from '../users/managed-group';
 import { CreateInfoPageDto, CreateTrainingDto, UpdateInfoPageDto } from './dto/create-training.dto';
 
 
 @Injectable()
 export class TrainingService {
-    constructor(private prisma: PrismaService) {
-        cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
-        });
-    }
+    constructor(
+        private prisma: PrismaService,
+        private uploads: UploadsService,
+    ) { }
 
+    // Зображення зберігається на сервері платформи (ТЗ 1: без зовнішніх сервісів).
+    // GA завантажує лише для матеріалів своєї групи.
     async uploadImageToMaterial(materialId: string, file: Express.Multer.File, user: User) {
-        console.log("materialId " + materialId);
         const material = await this.prisma.trainingMaterial.findUnique({ where: { id: materialId } });
-        console.log("material " + material)
         if (!material) {
-            console.log('Матеріал не знайдено')
             throw new NotFoundException('Матеріал не знайдено');
         }
-
-        const uploadFromBuffer = (fileBuffer: Buffer): Promise<any> => {
-            return new Promise((resolve, reject) => {
-                const uploadStream = cloudinary.uploader.upload_stream(
-                    {
-                        folder: 'training-materials',
-                        transformation: [{ width: 1000, crop: "limit", format: "auto", quality: "auto" }]
-                    },
-                    (error, result) => {
-                        if (error) return reject(error);
-                        resolve(result);
-                    }
-                );
-                streamifier.createReadStream(fileBuffer).pipe(uploadStream);
-            });
-        };
-
-        try {
-            const result = await uploadFromBuffer(file.buffer);
-
-            return await this.prisma.trainingMaterial.update({
-                where: { id: materialId },
-                data: { imageUrl: result.secure_url },
-            });
-        } catch (error) {
-            throw new BadRequestException('Помилка при завантаженні зображення в Cloudinary');
+        if (user.role !== Roles.SuperAdmin) {
+            const group = await this.prisma.userGroup.findFirst({ where: managedGroupWhere(user.id), select: { id: true } });
+            if (!group || material.groupId !== group.id) {
+                throw new ForbiddenException('Ви можете змінювати лише матеріали своєї групи');
+            }
         }
+
+        const imageUrl = await this.uploads.saveImage('training', file);
+        return this.prisma.trainingMaterial.update({
+            where: { id: materialId },
+            data: { imageUrl },
+        });
     }
 
     async getAllInfoPages(search?: string) {
@@ -89,18 +70,20 @@ export class TrainingService {
         });
     }
 
-    async updateTrainingMaterial(id: string, user: User, data: CreateTrainingDto) {
+    async updateTrainingMaterial(id: string, user: User, data: Partial<CreateTrainingDto>) {
         const material = await this.prisma.trainingMaterial.findUnique({ where: { id } });
         if (!material) throw new NotFoundException('Матеріал не знайдено');
 
         if (user.role !== Roles.SuperAdmin) {
-            const AdminInfo = await this.prisma.userGroup.findUnique({
-                where: { AdminId: user.id }
+            const AdminInfo = await this.prisma.userGroup.findFirst({
+                where: managedGroupWhere(user.id)
             });
 
             if (!AdminInfo || material.groupId !== AdminInfo.id) {
                 throw new ForbiddenException('Ви можете редагувати лише матеріали своєї групи');
             }
+            // GA публікує лише в межах своєї групи (ТЗ 17): групу й видимість змінює тільки SuperAdmin.
+            data = { ...data, groupId: AdminInfo.id, visibility: MaterialVisibility.Group };
         }
 
         return this.prisma.trainingMaterial.update({
@@ -109,35 +92,45 @@ export class TrainingService {
         });
     }
 
-    async getTrainingMaterials(user: any, search?: string) {
-        const whereClause: any = { isPublished: true };
+    // Група, у межах якої користувач бачить матеріали: GA - група, якою керує; User - своя група.
+    private async viewerGroupId(user: { id: string; role: Roles; userGroupId?: string | null }) {
+        if (user.role === Roles.Admin) {
+            const group = await this.prisma.userGroup.findFirst({ where: managedGroupWhere(user.id), select: { id: true } });
+            return group?.id ?? null;
+        }
+        return user.userGroupId ?? null;
+    }
 
+    // Список (ТЗ 17): SA - усі; GA - загальні, своєї групи (включно з неопублікованими, щоб їх редагувати);
+    // User - опубліковані загальні та своєї групи, з урахуванням ролей.
+    async getTrainingMaterials(user: any, search?: string) {
+        const and: any[] = [];
         if (search) {
-            whereClause.OR = [
-                { title: { contains: search, mode: 'insensitive' } },
-                { content: { contains: search, mode: 'insensitive' } },
-            ];
+            and.push({
+                OR: [
+                    { title: { contains: search, mode: 'insensitive' } },
+                    { content: { contains: search, mode: 'insensitive' } },
+                ],
+            });
         }
 
         if (user.role !== Roles.SuperAdmin) {
-            whereClause.AND = [
-                {
-                    OR: [
-                        { visibility: MaterialVisibility.All },
-                        { visibility: MaterialVisibility.Group, groupId: user.userGroupId },
-                    ],
-                },
-                {
-                    OR: [
-                        { allowedRoles: { isEmpty: true } },
-                        { allowedRoles: { has: user.role } },
-                    ],
-                },
-            ];
+            const groupId = await this.viewerGroupId(user);
+            const visible = {
+                AND: [
+                    { OR: [{ visibility: MaterialVisibility.All }, ...(groupId ? [{ visibility: MaterialVisibility.Group, groupId }] : [])] },
+                    { OR: [{ allowedRoles: { isEmpty: true } }, { allowedRoles: { has: user.role } }] },
+                ],
+            };
+            and.push(
+                user.role === Roles.Admin && groupId
+                    ? { OR: [{ AND: [{ isPublished: true }, visible] }, { groupId }] }
+                    : { isPublished: true, ...visible },
+            );
         }
 
         return this.prisma.trainingMaterial.findMany({
-            where: whereClause,
+            where: { AND: and },
             include: { author: { select: { firstName: true, lastName: true } } },
             orderBy: { createdAt: 'desc' },
         });
@@ -148,7 +141,7 @@ export class TrainingService {
         if (!material) throw new NotFoundException('Матеріал не знайдено');
 
         if (user.role !== Roles.SuperAdmin && material.visibility === MaterialVisibility.Group) {
-            if (material.groupId !== user.userGroupId) {
+            if (material.groupId !== (await this.viewerGroupId(user))) {
                 throw new ForbiddenException('У вас немає доступу до цього матеріалу');
             }
         }
@@ -156,34 +149,32 @@ export class TrainingService {
         return material;
     }
 
+    // SA публікує для всіх (або для групи/ролей), GA - лише в межах своєї групи (ТЗ 17).
     async createTrainingMaterial(user: User, data: CreateTrainingDto) {
-        const isSuperAdmin = user.role === Roles.SuperAdmin;
-        const AdminInfo = await this.prisma.userGroup.findUnique({
-            where: { AdminId: user.id }
+        if (user.role === Roles.SuperAdmin) {
+            return this.prisma.trainingMaterial.create({
+                data: { ...data, authorId: user.id, visibility: data.visibility || MaterialVisibility.All },
+            });
+        }
+
+        const group = await this.prisma.userGroup.findFirst({ where: managedGroupWhere(user.id), select: { id: true } });
+        if (!group) {
+            throw new ForbiddenException('Адміністратор без групи не може створювати матеріали');
+        }
+        return this.prisma.trainingMaterial.create({
+            data: { ...data, authorId: user.id, groupId: group.id, visibility: MaterialVisibility.Group },
         });
-        const isAdmin = !!AdminInfo;
-
-        if (!isSuperAdmin && !isAdmin) {
-            throw new ForbiddenException('Тільки адміністратори можуть створювати матеріали');
-        }
-        if (!AdminInfo) {
-            throw new ForbiddenException('Групи відсутні у адміністратора');
-        } else {
-            const finalData = {
-                ...data,
-                authorId: user.id,
-                groupId: isSuperAdmin ? data.groupId : AdminInfo.id,
-                visibility: isSuperAdmin ? (data.visibility || MaterialVisibility.All) : MaterialVisibility.Group,
-            };
-            return this.prisma.trainingMaterial.create({ data: finalData });
-        }
-
     }
 
-    async togglePublishStatus(id: string, isPublished: boolean, user: any) {
+    async togglePublishStatus(id: string, isPublished: boolean, user: User) {
+        const material = await this.prisma.trainingMaterial.findUnique({ where: { id }, select: { groupId: true } });
+        if (!material) throw new NotFoundException('Матеріал не знайдено');
+        if (user.role !== Roles.SuperAdmin && material.groupId !== (await this.viewerGroupId(user))) {
+            throw new ForbiddenException('Ви можете публікувати лише матеріали своєї групи');
+        }
         return this.prisma.trainingMaterial.update({
             where: { id },
-            data: { isPublished },
+            data: { isPublished: !!isPublished },
         });
     }
 }

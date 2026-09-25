@@ -1,3 +1,4 @@
+import { corsOrigins } from '../utils/cors';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -11,7 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @WebSocketGateway({
     cors: {
-        origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://auctions-be.duckdns.org', 'https://panel.caddyluck.com.ua'],
+        origin: corsOrigins(),
         credentials: true,
     },
     namespace: 'notifications',

@@ -1,3 +1,4 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Controller, Delete, Get, Param, Req, UseGuards } from '@nestjs/common';
 import { ApiQuery } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
@@ -26,6 +27,7 @@ export class SessionsApiController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.Admin, Roles.SuperAdmin)
+  @Audit('session.terminate', 'Примусово завершено сесію {params.id}')
   @Delete(':id')
   finish(@Param('id') id: string, @Req() req) {
     return this.sessionsService.terminateSession(id, req.user.id);

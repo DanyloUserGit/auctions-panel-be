@@ -239,31 +239,16 @@ export class CalculationService {
       baseUSD = baseTotal * eurToUsd;
     }
 
-    // ===================== IMPORT DUTY =====================
-    let importDuty = 0;
-
-    if (params.table === '27031') {
-      const type = params.calculationType || 'full';
-      importDuty = baseUSD * (type === 'reduced' ? 0.014 : 0.1);
-    }
-
-    if (params.table === '27032') {
-      importDuty = baseUSD * 0.1;
-    }
-
-    if (params.table === '27033') {
-      importDuty = 0; // електро
-    }
-
     // ===================== EXCISE =====================
+    // Акциз не залежить від варіанта: електро - від ємності батареї (1 € за кВт·год),
+    // ДВЗ - від об'єму двигуна, палива (бензин / дизель) та віку.
     let excise = 0;
+    const eurToUsdRate = params.eurToUsd || 1;
 
     if (params.table === '27033' || params.fuelType === 'electric') {
       const battery = this.ensurePositiveNumber(params.batteryCapacity, 'batteryCapacity');
-
-      // приклад ставки (можеш змінити)
-      const RATE_PER_KWH = 1;
-      excise = battery * RATE_PER_KWH;
+      const EXCISE_EUR_PER_KWH = 1;
+      excise = battery * EXCISE_EUR_PER_KWH * eurToUsdRate;
     } else {
       const engineVolume = this.ensurePositiveNumber(params.engineVolume, 'engineVolume');
 
@@ -279,22 +264,19 @@ export class CalculationService {
       excise = baseRate * (engineVolume / 1000) * age;
     }
 
-    // ===================== VAT =====================
-    const vat = (baseUSD + importDuty + excise) * 0.2;
-
-    // ===================== TOTAL CUSTOMS =====================
-    const totalCustoms = importDuty + excise + vat;
-
-    // ===================== SERVICE FEE =====================
-    let serviceFee = 0;
-
-    if (params.table === '27031') {
-      serviceFee = params.calculationType === 'reduced' ? 300 : 500;
-    } else if (params.table === '27032') {
-      serviceFee = 500;
-    } else if (params.table === '27033') {
-      serviceFee = 400;
-    }
+    // ===================== ВАРІАНТИ (за кодом замовника rozrahunok (2).tpl, [?16]) =====================
+    // 27031 (європейські бренди): без сертифіката - мито 10 %, брокер 300 $;
+    //                             з сертифікатом походження - мито 0 %, брокер 1100 $.
+    // 27032 (неєвропейські): мито 10 %. 27033 (електро): мито 0 %, брокер 300 $.
+    const variants: { code: string; title: string; dutyRate: number; broker: number }[] =
+      params.table === '27031'
+        ? [
+          { code: 'no-cert', title: 'Без сертифіката (мито 10 %, брокер 300 $)', dutyRate: 0.1, broker: 300 },
+          { code: 'cert', title: 'З сертифікатом походження (мито 0 %, брокер 1100 $)', dutyRate: 0, broker: 1100 },
+        ]
+        : params.table === '27032'
+          ? [{ code: 'full', title: 'Неєвропейські бренди (мито 10 %)', dutyRate: 0.1, broker: 500 }]
+          : [{ code: 'electric', title: 'Електромобіль (мито 0 %, брокер 300 $)', dutyRate: 0, broker: 300 }];
 
     // ===================== EXTRA COSTS =====================
     const extras =
@@ -303,46 +285,41 @@ export class CalculationService {
       Number(params.border || 0) +
       Number(params.towing || 0);
 
-    // ===================== FINAL =====================
-    const totalInUkraine =
-      baseUSD +
-      totalCustoms +
-      serviceFee +
-      extras;
-    const eurToUsd = params.eurToUsd || 1;
-    const usdToEur = 1 / eurToUsd;
-    const cards = [
-      {
-        code: 'full',
-        title: 'Повний розрахунок',
-
+    const usdToEur = 1 / eurToUsdRate;
+    const cards = variants.map((variant) => {
+      const importDuty = baseUSD * variant.dutyRate;
+      // ПДВ 20 % від суми «авто + акциз + мито».
+      const vat = (baseUSD + importDuty + excise) * 0.2;
+      const totalCustoms = importDuty + excise + vat;
+      const totalInUkraine = baseUSD + totalCustoms + variant.broker + extras;
+      return {
+        code: variant.code,
+        title: variant.title,
         totalUSD: Math.round(totalInUkraine),
-        brokerUSD: Math.round(serviceFee),
-
+        brokerUSD: Math.round(variant.broker),
         dutyUSD: Math.round(importDuty),
         dutyEUR: Math.round(importDuty * usdToEur),
-
         exciseUSD: Math.round(excise),
         exciseEUR: Math.round(excise * usdToEur),
-
         vatUSD: Math.round(vat),
         vatEUR: Math.round(vat * usdToEur),
-
         customsPaymentsUSD: Math.round(totalCustoms),
         customsPaymentsEUR: Math.round(totalCustoms * usdToEur),
-      },
-    ];
+      };
+    });
+    const main = cards[0];
+
     return {
       basePriceFromDb: Math.round(baseUSD),
       details: {
-        importDuty: Math.round(importDuty),
-        excise: Math.round(excise),
-        vat: Math.round(vat),
-        totalCustoms: Math.round(totalCustoms),
+        importDuty: main.dutyUSD,
+        excise: main.exciseUSD,
+        vat: main.vatUSD,
+        totalCustoms: main.customsPaymentsUSD,
       },
-      serviceFee: Math.round(serviceFee),
-      totalInUkraine: Math.round(totalInUkraine),
-      cards
+      serviceFee: main.brokerUSD,
+      totalInUkraine: main.totalUSD,
+      cards,
     };
   }
 

@@ -27,6 +27,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) throw new UnauthorizedException();
     if (user.isBlocked) throw new UnauthorizedException('Користувача заблоковано');
 
+    // Остання активність у панелі (ТЗ 4): не частіше ніж раз на хвилину, без очікування.
+    this.usersService.touchActivity(user.id).catch(() => undefined);
     return user;
   }
 }

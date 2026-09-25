@@ -30,6 +30,15 @@ enum SessionRights {
   All
 }
 
+// Статус доступу користувача (ТЗ 12). «Заблокований» - окремий прапорець User.isBlocked,
+// щоб після розблокування повертався попередній статус.
+enum AccessStatus {
+  ReadOnly // Тільки перегляд
+  Purchase // Дозволені покупки
+  PurchaseSale // Дозволені покупки + дозволені продажі
+  PurchaseNoSales // Дозволені покупки без доступу до продажів
+}
+
 enum NotificationChannel {
   InApp
   Email
@@ -51,6 +60,13 @@ enum SessionEventType {
   Other
 }
 
+enum SessionEndReason {
+  Admin // завершив адміністратор у «Всіх діях»
+  Inactivity // таймаут бездіяльності
+  NoConnections // від'єдналися всі користувачі
+  Error // збій браузера / воркера (статус «помилка»)
+}
+
 enum LogSeverity {
   Info
   Warning
@@ -61,23 +77,34 @@ model User {
   id                       String                    @id @default(uuid()) @db.Uuid()
   firstName                String
   lastName                 String
+  middleName               String?
   email                    String                    @unique
   password                 String
   phone                    String?
   city                     String?
+  // Адмін-поля картки контролю (ТЗ 11): бачать і змінюють лише SA та GA своєї групи.
+  hasContract              Boolean                   @default(false)
+  contractNumber           String?
+  depositAmount            Decimal?                  @db.Decimal(12, 2)
+  depositMethod            String?
+  adminComment             String?                   @db.Text
+  adminExtra               String?                   @db.Text
   telegramChatId           String?
   viberId                  String?
   role                     Roles                     @default(User)
+  /// Застаріле (замінено accessStatus), не використовується; видалити після перевірки міграції на копії продакшн-бази.
   rights                   Rights                    @default(Read)
+  /// Застаріле (замінено accessStatus), не використовується; видалити після перевірки міграції на копії продакшн-бази.
   sessionRights            SessionRights             @default(Read)
+  accessStatus             AccessStatus              @default(ReadOnly)
   isActive                 Boolean                   @default(true)
   isBlocked                Boolean                   @default(false)
-  sessionLimit             Int                       @default(1)
+  // Особистий ліміт одночасних сесій (вкладок) користувача; 0 - без особистого ліміту.
+  sessionLimit             Int                       @default(0)
   lastLogin                DateTime?
   lastActivity             DateTime?
   refreshTokens            RefreshToken[]
-  session                  Session?                  @relation(fields: [sessionId], references: [id])
-  sessionId                String?                   @db.Uuid()
+  sessionConnections       SessionConnection[]
   resetTokens              ResetToken[]
   userGroup                UserGroup?                @relation("GroupParticipants", fields: [userGroupId], references: [id])
   userGroupId              String?                   @db.Uuid()
@@ -92,6 +119,13 @@ model User {
   personalAuctions         Auction[]                 @relation("UserPersonalAuctions")
   personalAccounts         AuctionAuth[]             @relation("UserPersonalAccounts")
   deniedAccounts           AuctionAuth[]             @relation("UserDeniedAccounts")
+  inStockCars              InStockCarOwner[]
+  crmClients               CrmClientAssignment[]
+  auditActions             AuditLog[]                @relation("AuditActor")
+  auditEvents              AuditLog[]                @relation("AuditTarget")
+  auctionReminders         AuctionReminder[]
+  accessRules              AccessRule[]
+  clients                  Client[]
 
   @@map("users")
 }
@@ -115,7 +149,7 @@ model TrainingMaterial {
   isPublished Boolean @default(false)
 
   visibility   MaterialVisibility @default(All)
-  allowedRoles Roles[]
+  allowedRoles Roles[] @default([])
 
   authorId String @db.Uuid()
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
@@ -223,18 +257,22 @@ model Session {
   isActive          Boolean
 
   auctionId String  @db.Uuid
-  auction   Auction @relation(fields: [auctionId], references: [id])
+  auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   auctionAuthId String      @db.Uuid
   account       AuctionAuth @relation(fields: [auctionAuthId], references: [id])
 
-  users     User[]
-  logs      SessionLog[]
-  endedAt   DateTime?
-  endedById String?      @db.Uuid()
-  endedBy   User?        @relation("SessionTerminator", fields: [endedById], references: [id])
+  connections SessionConnection[]
+  logs        SessionLog[]
+  endedAt     DateTime?
+  endedById   String?           @db.Uuid()
+  endedBy     User?             @relation("SessionTerminator", fields: [endedById], references: [id])
+  endReason   SessionEndReason?
+  // Текст помилки для сесій, завершених через збій (статус «помилка»).
+  errorMessage String?          @db.Text
 
-  expiresAt      DateTime
+  // Остання дія користувача в сесії - для завершення за таймаутом бездіяльності.
+  lastActivityAt DateTime      @default(now())
   createdAt      DateTime      @default(now())
   worker         Worker?       @relation(fields: [workerId], references: [id])
   workerId       String?       @db.Uuid()
@@ -244,10 +282,32 @@ model Session {
   @@map("sessions")
 }
 
+// Підключення користувача до сесії (одна вкладка в панелі). Один користувач може бути
+// підключений до кількох сесій одночасно, а в сесії - кілька користувачів.
+model SessionConnection {
+  id             String    @id @default(uuid()) @db.Uuid()
+  sessionId      String    @db.Uuid()
+  session        Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId         String    @db.Uuid()
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // socket.io id клієнта; за ним воркер тримає окрему сторінку браузера для вкладки.
+  clientId       String?
+  connectedAt    DateTime  @default(now())
+  disconnectedAt DateTime?
+
+  @@index([sessionId, disconnectedAt])
+  @@index([userId, disconnectedAt])
+  @@map("session_connections")
+}
+
 model Auction {
   id                 String              @id @default(uuid()) @db.Uuid()
   title              String
   url                String
+  // Проксі для сайтів, що блокують IP сервера (ТЗ 20, 22: Alcopa). URL з логіном/паролем - зашифрований,
+  // з API не повертається (PrismaService omit); proxyHost - лише для відображення.
+  proxyUrl           String?
+  proxyHost          String?
   sessions           Session[]
   auctionAuths       AuctionAuth[]
   auctionGroup       AuctionGroup?       @relation(fields: [auctionGroupId], references: [id])
@@ -257,6 +317,7 @@ model Auction {
   forbiddenRoutes    ForbiddenRoute[]
   allowedForGroups   UserGroup[]         @relation("UserGroupAllowedAuctions")
   allowedForUsers    User[]              @relation("UserPersonalAuctions")
+  accessRules        AccessRule[]
 
   @@map("auctions")
 }
@@ -284,6 +345,11 @@ model UserGroup {
 
   canGaManageAccounts Boolean @default(false)
   showAccounts        Boolean @default(true)
+  // Ліміт одночасних сесій, до яких підключені учасники групи; 0 - без ліміту.
+  sessionLimit        Int     @default(0)
+  // Чи може GA задавати правила заборон для своєї групи (ТЗ 8: «якщо дозволено»).
+  canGaManageRules    Boolean @default(false)
+  accessRules         AccessRule[]
   rules               Json?   @default("{}")
 
   lastActivity DateTime?
@@ -308,7 +374,7 @@ model AllowedRoute {
   id        String  @id @default(uuid()) @db.Uuid()
   path      String
   auctionId String  @db.Uuid
-  auction   Auction @relation(fields: [auctionId], references: [id])
+  auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   @@map("allowed_routes")
 }
@@ -317,7 +383,7 @@ model ForbiddenRoute {
   id        String  @id @default(uuid()) @db.Uuid()
   path      String
   auctionId String  @db.Uuid
-  auction   Auction @relation(fields: [auctionId], references: [id])
+  auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   @@map("forbidden_routes")
 }
@@ -326,7 +392,7 @@ model ForbiddenSelector {
   id        String  @id @default(uuid()) @db.Uuid()
   selector  String
   auctionId String  @db.Uuid
-  auction   Auction @relation(fields: [auctionId], references: [id])
+  auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   isBuyAction Boolean @default(false)
 
@@ -381,4 +447,130 @@ model SystemSetting {
   updatedAt   DateTime @updatedAt
 
   @@map("system_settings")
+}
+
+// Власник авто в «В наявності» (ТЗ 13.3). Авто зберігаються в базі замовника (cars_for_sale),
+// де немає місця для ID користувача платформи, тому власник - тут.
+model InStockCarOwner {
+  carId     Int      @id
+  ownerId   String   @db.Uuid()
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@map("in_stock_car_owners")
+}
+
+// Прив'язка клієнтів CRM (поле zamovnyk у cars_data / transport_payments) до користувачів платформи
+// (ТЗ 13.5, 13.6: User бачить процеси й баланси своїх клієнтів, GA - клієнтів своєї групи, SA - усіх).
+model CrmClientAssignment {
+  clientName String
+  userId     String   @db.Uuid()
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([clientName, userId])
+  @@index([userId])
+  @@map("crm_client_assignments")
+}
+
+enum AuditCategory {
+  Auth // входи й виходи (успішні та неуспішні)
+  Admin // зміни налаштувань, доступів, користувачів, статусів
+}
+
+// Журнал аудиту (ТЗ 4, 9, 12, 18): входи/виходи та дії адміністраторів. Секрети не зберігаються.
+model AuditLog {
+  id           String        @id @default(uuid()) @db.Uuid()
+  category     AuditCategory
+  action       String
+  message      String        @db.Text
+  details      Json?
+  actorId      String?       @db.Uuid()
+  actor        User?         @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUserId String?       @db.Uuid()
+  targetUser   User?         @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  ip           String?
+  createdAt    DateTime      @default(now())
+
+  @@index([category, createdAt])
+  @@index([actorId])
+  @@index([targetUserId])
+  @@map("audit_logs")
+}
+
+// Нагадування про завершення аукціону (ТЗ 15): єдиний тип сповіщень, який користувач налаштовує сам -
+// за скільки часу до завершення нагадати (UserNotificationSetting.value для AUCTION_ENDED, секунди).
+model AuctionReminder {
+  id        String    @id @default(uuid()) @db.Uuid()
+  userId    String    @db.Uuid()
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  url       String?
+  endsAt    DateTime
+  remindAt  DateTime
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([sentAt, remindAt])
+  @@map("auction_reminders")
+}
+
+enum RuleKind {
+  Route // перехід (адреса, шлях або шаблон)
+  Selector // елемент (CSS-селектор)
+}
+
+enum RuleEffect {
+  Forbid
+  Allow // виняток: дозволити те, що заборонено на ширшому рівні
+}
+
+// Правила контролю дій на рівнях (ТЗ 8): глобально (без групи й користувача), для групи користувачів,
+// для окремого користувача. Пріоритет: користувач > група > глобальні правила та правила аукціону.
+// auctionId порожній - правило діє на всіх аукціонах.
+model AccessRule {
+  id          String     @id @default(uuid()) @db.Uuid()
+  kind        RuleKind
+  value       String
+  effect      RuleEffect @default(Forbid)
+  isBuyAction Boolean    @default(false)
+  auctionId   String?    @db.Uuid()
+  auction     Auction?   @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  userGroupId String?    @db.Uuid()
+  userGroup   UserGroup? @relation(fields: [userGroupId], references: [id], onDelete: Cascade)
+  userId      String?    @db.Uuid()
+  user        User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
+
+  @@index([auctionId])
+  @@index([userGroupId])
+  @@index([userId])
+  @@map("access_rules")
+}
+
+enum ClientStage {
+  New // новий запит
+  Searching // підбір авто
+  Negotiation // узгодження
+  Purchased // куплено
+  Delivered // доставлено
+  Closed // закрито
+}
+
+// Клієнти (ТЗ 14): персональний облік замовників. User бачить своїх, GA - групи, SA - усіх.
+model Client {
+  id         String      @id @default(uuid()) @db.Uuid()
+  ownerId    String      @db.Uuid()
+  owner      User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  fullName   String
+  phone      String?
+  city       String?
+  lookingFor String?     @db.Text
+  stage      ClientStage @default(New)
+  comments   String?     @db.Text
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([ownerId])
+  @@map("clients")
 }

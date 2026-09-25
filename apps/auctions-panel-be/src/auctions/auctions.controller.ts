@@ -1,3 +1,4 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, ApiQuery, getSchemaPath } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
@@ -46,6 +47,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('rules.selector.add', 'Аукціону {params.id} додано заборонений елемент {body.selector}')
   @Post(':id/selector')
   @ApiBody({ type: AddSelectorSwaggerDto })
   @ApiCreatedResponse({
@@ -58,6 +60,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('rules.allowed.add', 'Аукціону {params.id} додано дозволену сторінку {body.path}')
   @Post(':id/allowed')
   @ApiBody({ type: AddPathSwaggerDto })
   @ApiCreatedResponse({
@@ -70,6 +73,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('rules.forbidden.add', 'Аукціону {params.id} додано заборонений перехід {body.path}')
   @Post(':id/forbidden')
   @ApiBody({ type: AddPathSwaggerDto })
   @ApiCreatedResponse({
@@ -82,6 +86,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('rules.allowed.remove', 'Видалено дозволену сторінку {params.id}')
   @Delete('remove-allowed-path/:id')
   @ApiCreatedResponse({
     description: 'Path deleted',
@@ -92,6 +97,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('rules.forbidden.remove', 'Видалено заборонений перехід {params.id}')
   @Delete('remove-forbidden-path/:id')
   @ApiCreatedResponse({
     description: 'Path deleted',
@@ -102,6 +108,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('rules.selector.remove', 'Видалено заборонений елемент {params.id}')
   @Delete('remove-forbidden-selector/:id')
   @ApiCreatedResponse({
     description: 'Path deleted',
@@ -112,6 +119,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction.create', 'Створено аукціон «{result.title}» ({result.url})')
   @Post()
   @ApiBody({ type: CreateAuctionSwaggerDto })
   @ApiCreatedResponse({
@@ -145,6 +153,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction.update', 'Змінено аукціон «{result.title}»')
   @Patch(':id')
   @ApiBody({ type: CreateAuctionSwaggerDto })
   @ApiCreatedResponse({
@@ -168,6 +177,7 @@ export class AuctionsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction.delete', 'Видалено аукціон «{result.title}»')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.auctionsService.remove(id);

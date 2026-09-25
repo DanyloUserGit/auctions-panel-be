@@ -4,8 +4,7 @@ export class NotificationContentDto {
 }
 
 export class CreateNotificationDto {
-    userId!: string;
+    userId?: string;
     typeName!: string;
     content!: NotificationContentDto;
-    sendEmail?: boolean;
 }

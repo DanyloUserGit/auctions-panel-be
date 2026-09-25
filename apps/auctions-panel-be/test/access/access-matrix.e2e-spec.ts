@@ -149,13 +149,15 @@ describe('Access matrix (user groups)', () => {
       expect(bSession.type).toBe('ready');
       const sessionId = (bSession as { sessionId: string }).sessionId;
 
+      // Чужий sessionId - лише підказка для відновлення вкладки: користувач отримує сесію свого акаунта.
       const reattach = await joinAuction(ctx, uA, { auctionId: c.E1.id, auctionAuthId: c.acc11.id, sessionId });
-      expect(reattach.type).toBe('error');
+      expect(reattach.type).toBe('ready');
+      expect((reattach as { sessionId: string }).sessionId).not.toBe(sessionId);
       const forged = await joinAuction(ctx, uA, { auctionId: c.E2.id, auctionAuthId: c.acc21.id, userId: uB.id });
       expect(forged.type).toBe('error');
 
-      const session = await ctx.prisma.session.findUniqueOrThrow({ where: { id: sessionId }, select: { users: { select: { id: true } } } });
-      expect(session.users.map((u) => u.id)).toEqual([uB.id]);
+      const connections = await ctx.prisma.sessionConnection.findMany({ where: { sessionId }, select: { userId: true } });
+      expect(connections.map((c) => c.userId)).toEqual([uB.id]);
     });
 
     it('SuperAdmin still sees the complete catalog and can use any account', async () => {

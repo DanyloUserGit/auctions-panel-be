@@ -5,6 +5,7 @@ import { AccessService, type AccessUser } from '../access/access.service';
 import { SAFE_AUTH_SELECT, accountSelectFor } from '../auction-auth/auction-auth.select';
 import { NotificationService } from '../notification/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { managedGroupIdOf, managedGroupWhere } from '../users/managed-group';
 import { CreateUserGroupDto } from './dto/create-user-group.dto';
 import { UpdateUserGroupDto } from './dto/update-user-group.dto';
 
@@ -19,7 +20,7 @@ export class UserGroupsService {
 
     // Не-SuperAdmin бачить лише власну групу: Admin - ту, якою керує, User - ту, до якої належить.
     private async ownGroupWhere(user: AccessUser): Promise<Prisma.UserGroupWhereInput> {
-        if (user.role === Roles.Admin) return { AdminId: user.id };
+        if (user.role === Roles.Admin) return managedGroupWhere(user.id);
 
         const userFull = await this.prisma.user.findUnique({
             where: { id: user.id },
@@ -67,14 +68,12 @@ export class UserGroupsService {
         telegramChatId: true,
         viberId: true,
         role: true,
-        rights: true,
-        sessionRights: true,
+        accessStatus: true,
         isActive: true,
         isBlocked: true,
         sessionLimit: true,
         lastLogin: true,
         lastActivity: true,
-        sessionId: true,
         userGroupId: true,
     } as const;
 
@@ -113,7 +112,7 @@ export class UserGroupsService {
                 throw new NotFoundException('Групу користувачів не знайдено');
             }
 
-            if (group.AdminId === user.id) return;
+            if (group.AdminId === user.id || (await managedGroupIdOf(this.prisma, user.id)) === groupId) return;
         }
 
         throw new ForbiddenException('Немає прав керувати цією групою користувачів');
@@ -155,14 +154,7 @@ export class UserGroupsService {
         });
 
         if (users && users.length > 0) {
-            await Promise.all(
-                users.map((userId) =>
-                    this.notificationService.notify(userId, 'ADDED_TO_GROUP', {
-                        subject: 'Додавання до групи',
-                        body: `Вас додано до групи користувачів "${group.name}"`,
-                    }),
-                ),
-            );
+            await this.notificationService.notifyGroupAdminAboutNewMember(group.id, users);
         }
 
         return group;
@@ -276,9 +268,13 @@ export class UserGroupsService {
         if (!isSuperAdmin) {
             delete updateUserGroupDto.canGaManageAccounts;
             delete updateUserGroupDto.showAccounts;
-            // Перепризначати адміністратора групи та змінювати доступи може лише SuperAdmin.
+            delete updateUserGroupDto.sessionLimit;
+            delete updateUserGroupDto.canGaManageRules;
+            // Перепризначати адміністратора групи, змінювати склад групи та доступи може лише SuperAdmin.
+            // Інакше GA міг би «перетягнути» у свою групу користувача з іншої групи.
             delete updateUserGroupDto.Admin;
             delete updateUserGroupDto.allowedAuctions;
+            delete updateUserGroupDto.users;
         }
 
         const { allowedAuctions, Admin, users, ...rest } = updateUserGroupDto;
@@ -310,14 +306,7 @@ export class UserGroupsService {
         });
 
         if (users && users.length > 0) {
-            await Promise.all(
-                users.map((userId) =>
-                    this.notificationService.notify(userId, 'ADDED_TO_GROUP', {
-                        subject: 'Додавання до групи',
-                        body: `Вас додано до групи користувачів "${group.name}"`,
-                    }),
-                ),
-            );
+            await this.notificationService.notifyGroupAdminAboutNewMember(group.id, users);
         }
 
         return group;

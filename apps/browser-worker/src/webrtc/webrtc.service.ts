@@ -3,6 +3,36 @@ import { ChildProcess, spawn } from 'child_process';
 import * as dgram from 'dgram';
 import { MediaStreamTrack, RTCPeerConnection, RTCRtpCodecParameters } from 'werift';
 import { BrowserService } from '../browser-worker.service';
+import { ClientRules } from '../rules/page-rules';
+import { announcePrivateAddresses } from './announce';
+
+// ICE для з'єднання з браузером користувача (ТЗ 20: Firefox «ICE failed, add a TURN server»).
+//   WEBRTC_ANNOUNCED_IP - публічна IP-адреса сервера (якщо воркер у Docker/NAT бачить лише внутрішню);
+//   WEBRTC_STUN_URLS, WEBRTC_TURN_URLS (через кому), WEBRTC_TURN_USERNAME, WEBRTC_TURN_CREDENTIAL.
+const list = (value?: string) => (value ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+
+function iceConfiguration() {
+  const iceServers: { urls: string; username?: string; credential?: string }[] = [];
+  const stun = list(process.env.WEBRTC_STUN_URLS);
+  (stun.length ? stun : ['stun:stun.l.google.com:19302']).forEach((urls) => iceServers.push({ urls }));
+  list(process.env.WEBRTC_TURN_URLS).forEach((urls) =>
+    iceServers.push({ urls, username: process.env.WEBRTC_TURN_USERNAME, credential: process.env.WEBRTC_TURN_CREDENTIAL }),
+  );
+  return {
+    iceServers,
+    icePortRange: [10000, 10050] as [number, number],
+  };
+}
+
+type OfferData = {
+  userId: string;
+  sessionId: string;
+  clientId: string;
+  signalData: any;
+  width: number;
+  height: number;
+  rules?: ClientRules;
+};
 
 @Injectable()
 export class WebrtcService {
@@ -16,20 +46,15 @@ export class WebrtcService {
   private ffmpegProcesses = new Map<string, ChildProcess>();
   private udpSockets = new Map<string, dgram.Socket>();
 
+  // Вкладку не вдалося відкрити (контролер повідомляє API, щоб помилку побачив саме цей клієнт).
+  onClientFailure?: (sessionId: string, clientId: string) => void;
+
   constructor(private browserService: BrowserService) { }
 
-  async handleOffer(
-    userId: string,
-    sessionId: string,
-    clientId: string,
-    offer: any,
-    viewport: { width: number; height: number },
-    onIceCandidate: (candidate: any) => void
-  ): Promise<any> {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-      icePortRange: [10000, 10050],
-    });
+  async handleOffer(data: OfferData, onIceCandidate: (candidate: any) => void): Promise<any> {
+    const { userId, sessionId, clientId, signalData: offer } = data;
+    const viewport = { width: data.width, height: data.height };
+    const pc = new RTCPeerConnection(iceConfiguration());
 
     if (!this.connections.has(sessionId)) {
       this.connections.set(sessionId, new Map());
@@ -47,8 +72,8 @@ export class WebrtcService {
             action.x = Math.round(action.x * viewport.width);
             action.y = Math.round(action.y * viewport.height);
           }
-          // ОНОВЛЕНО: Передаємо clientId, щоб клікати по його власній вкладці
-          this.browserService.interact(sessionId, clientId, userId, action).catch((e) => {
+          // Дія виконується на власній сторінці (вкладці) цього клієнта.
+          this.browserService.interact(sessionId, clientId, action).catch((e) => {
             this.logger.debug(`[WebRTC] Помилка обробки дії від клієнта ${clientId}: ${e}`);
           });
         } catch (e) {
@@ -86,6 +111,9 @@ export class WebrtcService {
         }
 
         // 3. Відправляємо оригінальний об'єкт без змін IP
+        if (typeof candidateObj.candidate === 'string') {
+          candidateObj.candidate = announcePrivateAddresses(candidateObj.candidate);
+        }
         onIceCandidate(candidateObj);
       } catch (e) {
         this.logger.debug(`[WebRTC] Помилка обробки ICE-кандидата для ${clientId}: ${e}`);
@@ -136,7 +164,7 @@ export class WebrtcService {
 
     // 2. 🛑 ВИПРАВЛЕННЯ: Запускаємо Playwright АСИНХРОННО (без await!)
     // Це дозволить миттєво повернути Answer клієнту, поки сторінка вантажиться
-    this.browserService.addClientPage(userId, sessionId, clientId, (frameBuffer) => {
+    this.browserService.addClientPage(userId, sessionId, clientId, data.rules, (frameBuffer) => {
       const ffmpegProcess = this.ffmpegProcesses.get(clientKey);
       if (ffmpegProcess && ffmpegProcess.stdin && ffmpegProcess.stdin.writable) {
         try {
@@ -156,14 +184,18 @@ export class WebrtcService {
           this.logger.debug(`Помилка запису кадру у FFmpeg`);
         }
       }
-    }).catch(e => this.logger.error(`Помилка створення вкладки для ${clientId}:`, e));
+    }).catch((e) => {
+      this.logger.error(`Помилка створення вкладки для ${clientId}:`, e);
+      this.onClientFailure?.(sessionId, clientId);
+    });
 
     // 3. Миттєво повертаємо Answer, щоб WebRTC успішно з'єднався!
-    return answer;
+    return { ...answer, sdp: announcePrivateAddresses(answer.sdp) };
 
   }
 
   private startVideoStreaming(sessionId: string, clientId: string, viewport: { width: number; height: number }) {
+    const stream = this.browserService.streamSettings(sessionId);
     const port = Math.floor(Math.random() * (60000 - 50000) + 50000);
     const clientKey = `${sessionId}_${clientId}`;
     const udpSocket = dgram.createSocket('udp4');
@@ -196,18 +228,18 @@ export class WebrtcService {
       ffmpegCmd = spawn('ffmpeg', [
       '-loglevel', 'error',
       '-f', 'image2pipe',
-      '-framerate', '24',
+      '-framerate', String(stream.fps),
       '-vcodec', 'mjpeg',
       '-i', '-',
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
       '-c:v', 'libvpx',
-      '-b:v', '2.5M',
+      '-b:v', `${stream.bitrateKbps}k`,
       '-threads', '2',
       '-deadline', 'realtime',
       '-cpu-used', '5',
       '-lag-in-frames', '0',
-      '-g', '24',
-      '-keyint_min', '24',
+      '-g', String(stream.fps * 2),
+      '-keyint_min', String(stream.fps),
       '-payload_type', '96',
       '-slice-max-size', '1200',
       '-f', 'rtp',

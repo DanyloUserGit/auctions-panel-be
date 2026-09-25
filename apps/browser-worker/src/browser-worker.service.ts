@@ -1,694 +1,369 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { BrowserContext, chromium, Page } from 'playwright';
+import { BrowserContext, chromium, Page, Request } from 'playwright';
 import UserAgent from 'user-agents';
 import { AuthStrategyRegistry } from './auth/auth.registry';
+import { buildPageScript, ClientRules, EMPTY_RULES, navigationBlockReason } from './rules/page-rules';
 import { LogSeverity, NotificationEventType, SessionEventType } from './types';
 
-interface SessionConfig {
-  url: string;
-  viewport: { width: number; height: number };
-  allowedRoutes: string[];
-  forbiddenSelectors: string[];
-  forbiddenRoutes: string[];
-  authData: { email: string; password: string };
+// Параметри трансляції (ТЗ 7.6): частота кадрів, якість JPEG-кадрів, бітрейт відео.
+export interface StreamSettings {
+  fps: number;
+  quality: number;
+  bitrateKbps: number;
+}
+
+export interface ProxySettings {
+  server: string;
+  username?: string;
+  password?: string;
 }
 
 interface ActiveSession {
   context: BrowserContext;
-  config: SessionConfig;
-  interactiveLoginStarted?: boolean;
+  url: string;
+  viewport: { width: number; height: number };
+  authData: { email: string; password: string };
+  stream: StreamSettings;
+  userDataDir: string;
+  loginStarted: boolean;
+  // Поки триває автологін, дії на сторінці не журналюються (логін акаунта - секрет для GA/User).
+  loginInProgress: boolean;
+  stopping: boolean;
 }
+
+interface ClientPage {
+  page: Page;
+  userId: string;
+  rules: ClientRules;
+  frameTimer?: NodeJS.Timeout;
+  lastActivityReport: number;
+}
+
+// Як часто воркер повідомляє API про активність користувача (для таймауту бездіяльності).
+const ACTIVITY_REPORT_MS = 15_000;
+
+export const DEFAULT_STREAM: StreamSettings = {
+  fps: Number(process.env.STREAM_FPS) || 15,
+  quality: Number(process.env.STREAM_JPEG_QUALITY) || 90,
+  bitrateKbps: Number(process.env.STREAM_BITRATE_KBPS) || 4000,
+};
+
+const REPORT_TYPES: Record<string, { eventType: SessionEventType; severity: LogSeverity; incident: boolean; label: string }> = {
+  click: { eventType: SessionEventType.ButtonClick, severity: LogSeverity.Info, incident: false, label: 'Натиск' },
+  input: { eventType: SessionEventType.TextInput, severity: LogSeverity.Info, incident: false, label: 'Введення тексту' },
+  forbidden_element: { eventType: SessionEventType.ForbiddenAction, severity: LogSeverity.Critical, incident: true, label: 'Заборонений елемент заблоковано' },
+  forbidden_link: { eventType: SessionEventType.ForbiddenAction, severity: LogSeverity.Critical, incident: true, label: 'Заборонений перехід заблоковано' },
+};
 
 @Injectable()
 export class BrowserService {
-  constructor(private readonly authRegistry: AuthStrategyRegistry, @Inject('API_CLIENT') private apiClient: ClientProxy) { }
-
   private readonly logger = new Logger(BrowserService.name);
+  private sessions = new Map<string, ActiveSession>();
+  private pages = new Map<string, ClientPage>();
   private actionQueues = new Map<string, Promise<void>>();
 
-  private activePages = new Map<string, Map<string, Page>>();
-  private sessions = new Map<string, ActiveSession>();
+  constructor(
+    private readonly authRegistry: AuthStrategyRegistry,
+    @Inject('API_CLIENT') private apiClient: ClientProxy,
+  ) { }
 
-  private frameIntervals = new Map<string, NodeJS.Timeout>();
-
-  async stopSession(sessionId: string): Promise<void> {
-    this.logger.log(`[BrowserService] Починаємо процес зупинки сесії: ${sessionId}`);
-    const session = this.sessions.get(sessionId);
-    if (!session) return;
-
-    try {
-      const clientPages = this.activePages.get(sessionId);
-      if (clientPages) {
-        for (const [clientId, page] of clientPages.entries()) {
-          try {
-            if (!page.isClosed()) await page.close();
-          } catch (e) {
-            this.logger.debug(`[BrowserService] Помилка закриття вкладки клієнта ${clientId} при зупинці сесії ${sessionId}: ${e}`);
-          }
-          const clientKey = `${sessionId}_${clientId}`;
-          const interval = this.frameIntervals.get(clientKey);
-          if (interval) {
-            clearInterval(interval);
-            this.frameIntervals.delete(clientKey);
-          }
-        }
-      }
-      await session.context.close();
-    } catch (error) {
-      this.logger.error(`[BrowserService] Помилка закриття для ${sessionId}:`, error);
-    } finally {
-      this.sessions.delete(sessionId);
-      this.activePages.delete(sessionId);
-    }
+  private key(sessionId: string, clientId: string) {
+    return `${sessionId}_${clientId}`;
   }
 
+  private log(sessionId: string, userId: string | undefined, eventType: SessionEventType, message: string, severity = LogSeverity.Info, isIncident = false) {
+    this.apiClient.emit('session.log.event', { sessionId, userId, eventType, severity, message, isIncident });
+  }
+
+  // Критичні помилки воркера - системне сповіщення Super Admin (ТЗ 15), не користувачу.
+  private notifyWorkerError(subject: string, body: string) {
+    this.apiClient.emit('notification.send', {
+      typeName: NotificationEventType.WORKER_ERROR,
+      content: { subject, body },
+    });
+  }
+
+  private failSession(sessionId: string, message: string) {
+    this.apiClient.emit('session.failed', { sessionId, message });
+  }
+
+  private reportActivity(sessionId: string, client: ClientPage) {
+    const now = Date.now();
+    if (now - client.lastActivityReport < ACTIVITY_REPORT_MS) return;
+    client.lastActivityReport = now;
+    this.apiClient.emit('session.activity', { sessionId, userId: client.userId });
+  }
+
+  // ---------- Сесія (браузерний контекст) ----------
+
   async launchSession(
-    userId: string,
     sessionId: string,
     url: string,
     viewport: { width: number; height: number },
     authData: { email: string; password: string },
-    allowedRoutes: string[],
-    forbiddenSelectors: string[],
-    forbiddenRoutes: string[]
+    stream: StreamSettings = DEFAULT_STREAM,
+    proxy?: ProxySettings,
   ) {
-    const userDataDir = path.join('/tmp/playwright_sessions', sessionId);
-    const userAgent = new UserAgent();
+    if (this.sessions.has(sessionId)) return;
+    const userDataDir = path.join(os.tmpdir(), 'playwright_sessions', sessionId);
 
     let context: BrowserContext;
     try {
       context = await chromium.launchPersistentContext(userDataDir, {
         headless: true,
         viewport,
-        userAgent: userAgent.toString(),
+        userAgent: new UserAgent().toString(),
         ignoreHTTPSErrors: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-        ],
+        proxy,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
       });
     } catch (error) {
-      this.logger.error(`[BrowserService] Не вдалось запустити браузер для сесії ${sessionId}:`, error);
-      this.apiClient.emit('notification.send', {
-        userId,
-        typeName: NotificationEventType.WORKER_ERROR,
-        content: {
-          subject: `[BrowserService] Помилка запуску браузера`,
-          body: `Не вдалось запустити сесію ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
-        },
-        sendEmail: true,
-      });
-      this.apiClient.emit('session.log.event', {
-        sessionId, userId,
-        eventType: SessionEventType.SessionError,
-        severity: LogSeverity.Critical,
-        message: `[BrowserService] Не вдалось запустити браузер: ${error instanceof Error ? error.message : String(error)}`,
-        isIncident: true,
-      });
-      throw error;
-    }
-    context.on('page', async (newPage) => {
-      try {
-        const opener = await newPage.opener();
-        if (!opener) return;
-
-        await newPage.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => { });
-        const targetUrl = newPage.url();
-        await newPage.close();
-
-        const clientPages = this.activePages.get(sessionId);
-        if (clientPages) {
-          for (const page of clientPages.values()) {
-            if (!page.isClosed()) {
-              await page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => { });
-            }
-          }
-        }
-      } catch (e) {
-        this.logger.error(`[BrowserService] Помилка обробки popup-вкладки: ${e}`);
-      }
-    });
-    // --- 1. ПРАВИЛА МАРШРУТИЗАЦІЇ (РОУТИ) ---
-
-    // 👇 ДОДАНО: Очищаємо масив від небезпечних значень (порожніх рядків та просто '/')
-    this.logger.warn("forbiddenRoutes: ", forbiddenRoutes)
-    const safeForbiddenRoutes = (forbiddenRoutes || [])
-      .map(r => r.trim())
-      .filter(r => r.length > 0 && r !== '/');
-
-    // (А) Блокування на рівні мережі (для повних перезавантажень сторінки)
-    await context.route('**/*', (route) => {
-      try {
-        const request = route.request();
-
-        if (request.isNavigationRequest()) {
-          const reqUrl = request.url();
-          // Використовуємо ОЧИЩЕНИЙ масив safeForbiddenRoutes
-          const isForbidden = safeForbiddenRoutes.some(fr => reqUrl.includes(fr));
-
-          if (isForbidden) {
-            this.apiClient.emit('notification.send', {
-              userId: userId,
-              typeName: NotificationEventType.WORKER_ERROR,
-              content: {
-                subject: `[Browser] Блокування переходу`,
-                body: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
-              },
-              sendEmail: true,
-            });
-            this.apiClient.emit('session.log.event', {
-              sessionId,
-              userId,
-              eventType: SessionEventType.ForbiddenAction,
-              severity: LogSeverity.Critical,
-              message: `[Browser] Блокування переходу (заборонений роут): ${reqUrl}`,
-              isIncident: true
-            });
-            return route.abort('accessdenied').catch(() => { });
-          }
-        }
-        route.continue().catch(() => { }); 
-      } catch (e) {
-        this.logger.debug(`[BrowserService] Помилка обробки маршруту: ${e}`);
-        route.continue().catch(() => { });
-      }
-    });
-    this.logger.warn("safeForbiddenRoutes: ", safeForbiddenRoutes)
-    if (safeForbiddenRoutes.length > 0) {
-      await context.addInitScript((routes: string[]) => {
-        const normalizeUrl = (u: string) => {
-          if (!u) return '';
-          try {
-            const parsed = new URL(u, window.location.origin);
-            return (parsed.hostname + parsed.pathname).replace(/\/+$/, '');
-          } catch (e) {
-            return u.replace(/\/+$/, ''); 
-          }
-        };
-
-        const normalizedRoutes = routes.map(normalizeUrl);
-
-        const isForbiddenUrl = (targetUrl: string) => {
-          if (!targetUrl) return false;
-          const targetNorm = normalizeUrl(targetUrl);
-          return normalizedRoutes.some(r => targetNorm.includes(r));
-        };
-
-        window.addEventListener('click', (e) => {
-          const link = (e.target as HTMLElement).closest('a');
-          if (link && link.href) {
-            const rawHref = link.getAttribute('href');
-            if (rawHref && (rawHref.startsWith('#') || rawHref.startsWith('javascript:'))) return;
-
-            if (isForbiddenUrl(link.href)) {
-              e.preventDefault();
-              e.stopPropagation();
-              this.apiClient.emit('notification.send', {
-                userId: userId,
-                typeName: NotificationEventType.WORKER_ERROR,
-                content: {
-                  subject: `[Browser] Блокування переходу`,
-                  body: `[Browser] Блокування переходу (заборонений роут): ${link.href}`,
-                },
-                sendEmail: true,
-              });
-              this.apiClient.emit('session.log.event', {
-                sessionId,
-                userId,
-                eventType: SessionEventType.ForbiddenAction,
-                severity: LogSeverity.Critical,
-                message: `[Browser] Блокування переходу (заборонений роут): ${link.href}`,
-                isIncident: true
-              });
-            }
-          }
-        }, true);
-
-        const originalPushState = history.pushState;
-        history.pushState = function (...args) {
-          const url = args[2];
-          if (url && isForbiddenUrl(url.toString())) return;
-          return originalPushState.apply(this, args);
-        };
-
-        const originalReplaceState = history.replaceState;
-        history.replaceState = function (...args) {
-          const url = args[2];
-          if (url && isForbiddenUrl(url.toString())) return;
-          return originalReplaceState.apply(this, args);
-        };
-      }, safeForbiddenRoutes);
-      await context.addInitScript(() => {
-        window.addEventListener('click', (e) => {
-          const link = (e.target as HTMLElement).closest('a[target="_blank"]');
-          if (link) link.removeAttribute('target');
-        }, true);
-      });
-    }
-    if (forbiddenSelectors && forbiddenSelectors.length > 0) {
-      await context.addInitScript((selectors: string[]) => {
-        const blockEvent = (e: Event) => {
-          const target = e.target as HTMLElement;
-          if (!target) return;
-
-          try {
-            const isForbidden = selectors.some(sel => target.matches(sel) || target.closest(sel));
-            if (isForbidden) {
-              e.stopPropagation(); 
-              e.preventDefault();  
-            }
-          } catch (err) {}
-        };
-
-        window.addEventListener('mousedown', blockEvent, true);
-        window.addEventListener('mouseup', blockEvent, true);
-        window.addEventListener('click', blockEvent, true);
-        window.addEventListener('keydown', blockEvent, true);
-        window.addEventListener('keyup', blockEvent, true);
-
-        window.addEventListener('DOMContentLoaded', () => {
-          const style = document.createElement('style');
-          style.textContent = selectors.map(s => `${s} { opacity: 0.6 !important; cursor: not-allowed !important; pointer-events: none !important; }`).join('\n');
-          document.head.appendChild(style);
-        });
-      }, forbiddenSelectors);
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Не вдалось запустити браузер для сесії ${sessionId}: ${message}`);
+      this.notifyWorkerError('Помилка запуску браузера', `Не вдалось запустити сесію ${sessionId}: ${message}`);
+      this.failSession(sessionId, 'не вдалося запустити браузер');
+      await fs.rm(userDataDir, { recursive: true, force: true }).catch(() => undefined);
+      return;
     }
 
-    this.sessions.set(sessionId, {
+    const session: ActiveSession = {
       context,
-      config: { url, viewport, allowedRoutes, forbiddenSelectors, forbiddenRoutes, authData }
+      url,
+      viewport,
+      authData,
+      stream,
+      userDataDir,
+      loginStarted: false,
+      loginInProgress: false,
+      stopping: false,
+    };
+    this.sessions.set(sessionId, session);
+
+    // Браузер закрився не з нашої команди - збій: сесія отримує статус «помилка», інші сесії не зачіпаються.
+    context.on('close', () => {
+      if (session.stopping) return;
+      this.logger.error(`Браузер сесії ${sessionId} несподівано закрився`);
+      this.notifyWorkerError('Збій браузера', `Браузер сесії ${sessionId} несподівано закрився`);
+      this.cleanupSession(sessionId).catch(() => undefined);
+      this.failSession(sessionId, 'браузер несподівано закрився');
     });
 
-    if (url) {
-      const strategy = this.authRegistry.get(url);
-      if (strategy) {
-        this.logger.log(`[BrowserService] Стратегію логіну для ${url} знайдено. Виконається після підключення клієнта.`);
-      } else {
-        this.apiClient.emit('notification.send', {
-          userId, typeName: NotificationEventType.WORKER_ERROR,
-          content: { subject: `[BrowserService] Стратегія логіну`, body: `Стратегію логіну '${url}' не знайдено!` },
-          sendEmail: false,
-        });
-        this.apiClient.emit('session.log.event', {
-          sessionId, userId, eventType: SessionEventType.SessionError,
-          severity: LogSeverity.Warning, message: `Стратегію логіну '${url}' не знайдено!`, isIncident: false,
-        });
+    // Сайт відкрив нове вікно (popup, форма з target=_blank): відкриваємо адресу в тій вкладці
+    // користувача, з якої його відкрито, - інші користувачі сесії цього не бачать.
+    context.on('page', async (popup) => {
+      const opener = await popup.opener().catch(() => null);
+      if (!opener) return;
+      const owner = [...this.pages.values()].find((c) => c.page === opener);
+      await popup.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => undefined);
+      const target = popup.url();
+      await popup.close().catch(() => undefined);
+      if (owner && target && target !== 'about:blank') {
+        await owner.page.goto(target, { waitUntil: 'domcontentloaded' }).catch(() => undefined);
       }
-    }
-
-    this.apiClient.emit('session.log.event', {
-      sessionId,
-      userId: userId,
-      eventType: SessionEventType.Other,
-      severity: LogSeverity.Info,
-      message: `[BrowserService] Context для сесії з id: ${sessionId} успішно створено.`,
-      isIncident: false
     });
-    return context;
+
+    if (!this.authRegistry.get(url)) {
+      this.log(sessionId, undefined, SessionEventType.SessionError, `Стратегію автологіну для '${url}' не знайдено`, LogSeverity.Warning);
+    }
+    this.log(sessionId, undefined, SessionEventType.Other, 'Браузер сесії запущено');
   }
 
+  private async cleanupSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.sessions.delete(sessionId);
+    for (const [key, client] of this.pages) {
+      if (!key.startsWith(`${sessionId}_`)) continue;
+      if (client.frameTimer) clearInterval(client.frameTimer);
+      this.pages.delete(key);
+    }
+    // Профіль браузера сесії більше не потрібен.
+    await fs.rm(session.userDataDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  async stopSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.stopping = true;
+    try {
+      await session.context.close();
+    } catch (error) {
+      this.logger.error(`Помилка закриття браузера сесії ${sessionId}`, error as Error);
+    } finally {
+      await this.cleanupSession(sessionId);
+    }
+  }
+
+  streamSettings(sessionId: string): StreamSettings {
+    return this.sessions.get(sessionId)?.stream ?? DEFAULT_STREAM;
+  }
+
+  // ---------- Вкладка користувача (сторінка) ----------
+
   async addClientPage(
-    userId,
+    userId: string,
     sessionId: string,
     clientId: string,
-    onFrame: (buffer: Buffer) => void
-  ): Promise<Page | null> {
+    rules: ClientRules = EMPTY_RULES,
+    onFrame: (buffer: Buffer) => void,
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
-    if (!session) return null;
+    if (!session) throw new Error('Браузер сесії не запущено');
 
-    let page: Page;
+    const key = this.key(sessionId, clientId);
+    await this.removePageForClient(sessionId, clientId);
+
+    const page = await session.context.newPage();
+    const client: ClientPage = { page, userId, rules, lastActivityReport: 0 };
+    this.pages.set(key, client);
+
     try {
-      page = await session.context.newPage();
-    } catch (error) {
-      this.logger.error(`[BrowserService] Не вдалось створити вкладку для клієнта ${clientId}:`, error);
-      throw error;
-    }
-
-    try {
-      await page.exposeFunction('logActionToNode', (actionType: string, details: string, currentUrl: string) => {
-      const urlLabel = currentUrl || 'невідома сторінка';
-      const fullMessage = `Користувач ${userId} -> ${actionType} -> ${details} (сторінка: ${urlLabel})`;
-
-      this.apiClient.emit('session.log.event', {
-        sessionId,
-        userId,
-        eventType: SessionEventType.Other,
-        severity: LogSeverity.Info,
-        message: fullMessage,
-        isIncident: false
+      // Дії на сторінці (натискання, введення, заборонені дії) - у журнал із правильними тегами (ТЗ 9).
+      await page.exposeFunction('__pwReport', (kind: string, details: string, currentUrl: string) => {
+        const type = REPORT_TYPES[kind];
+        if (!type || session.loginInProgress) return;
+        this.log(sessionId, userId, type.eventType, `${type.label}: ${details} (сторінка: ${currentUrl})`, type.severity, type.incident);
+        this.reportActivity(sessionId, client);
       });
-      this.logger.debug(
-        `[User Action] user=${userId} session=${sessionId} action="${actionType}" url="${urlLabel}" target="${details}"`
-      );
-    });
+      await page.addInitScript({ content: buildPageScript(rules, session.url) });
 
-    await page.addInitScript(() => {
-      const getElementDescription = (el: HTMLElement): string => {
-        if (!el) return 'невідомий об\'єкт';
-
-        const tagName = el.tagName.toLowerCase();
-
-        const ariaLabel = el.getAttribute('aria-label');
-        if (ariaLabel) return `<${tagName}> [aria-label="${ariaLabel}"]`;
-
-        const title = el.getAttribute('title');
-        if (title) return `<${tagName}> [title="${title}"]`;
-
-        const id = el.id;
-        if (id) return `<${tagName}> [id="${id}"]`;
-
-        const name = el.getAttribute('name');
-        if (name) return `<${tagName}> [name="${name}"]`;
-
-        const placeholder = el.getAttribute('placeholder');
-        if (placeholder) return `<${tagName}> [placeholder="${placeholder}"]`;
-
-        const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (text.length > 0) {
-          return `<${tagName}> з текстом "${text.substring(0, 60)}"`;
+      // Заборонені переходи на рівні мережі (повне завантаження сторінки, редирект, форма).
+      await page.route('**/*', (route) => {
+        const request: Request = route.request();
+        // Під час автологіну сайт може водити сторінками входу - список дозволених не застосовується.
+        const reason = request.isNavigationRequest() && request.frame() === page.mainFrame()
+          ? navigationBlockReason(request.url(), client.rules, session.url)
+          : null;
+        if (reason && !(session.loginInProgress && reason !== 'заборонений перехід')) {
+          this.log(sessionId, userId, SessionEventType.ForbiddenAction, `Перехід заблоковано (${reason}): ${request.url()}`, LogSeverity.Critical, true);
+          return route.abort('blockedbyclient').catch(() => undefined);
         }
-
-        const img = el.querySelector('img');
-        if (img && img.getAttribute('alt')) {
-          return `<${tagName}> із зображенням [alt="${img.getAttribute('alt')}"]`;
-        }
-
-        const svg = el.querySelector('svg');
-        if (svg) {
-          const svgClass = svg.getAttribute('class') || '';
-          const dataIcon = svg.getAttribute('data-icon') || svgClass.split(/\s+/)[0];
-          if (dataIcon) return `<${tagName}> з іконкою [${dataIcon}]`;
-        }
-
-        const className = (el.getAttribute('class') || '').trim().split(/\s+/).slice(0, 2).join('.');
-        const classStr = className ? `.${className}` : '';
-
-        const parent = el.parentElement;
-        if (parent) {
-          const parentTag = parent.tagName.toLowerCase();
-          const parentId = parent.id ? `#${parent.id}` : '';
-          const parentClass = (parent.getAttribute('class') || '').trim().split(/\s+/)[0];
-          const parentClassStr = parentClass ? `.${parentClass}` : '';
-
-          return `елемент <${tagName}${classStr}> (без тексту) всередині блоку <${parentTag}${parentId}${parentClassStr}>`;
-        }
-
-        return `<${tagName}${classStr}> (без ідентифікаторів)`;
-      };
-
-      document.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        if (!target) return;
-
-        const interactiveEl = target.closest('button, a, input, select, textarea, [role="button"], [tabindex]') || target;
-
-        const description = getElementDescription(interactiveEl as HTMLElement);
-        const currentUrl = window.location.href;
-
-        (window as any).logActionToNode('Клік', description, currentUrl);
-      }, true);
-
-      document.addEventListener('change', (e) => {
-        const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-        if (!target) return;
-
-        const tagName = target.tagName.toLowerCase();
-        if (['input', 'textarea', 'select'].includes(tagName)) {
-          const isPassword = target.type === 'password';
-          const value = isPassword ? '********' : target.value;
-
-          const description = getElementDescription(target);
-          const currentUrl = window.location.href;
-
-          (window as any).logActionToNode(
-            'Ввід даних',
-            `Поле ${description} змінило значення на: "${value}"`,
-            currentUrl
-          );
-        }
-      }, true);
-    });
-    if (!this.activePages.has(sessionId)) {
-      this.activePages.set(sessionId, new Map());
-    }
-    this.activePages.get(sessionId)!.set(clientId, page);
-
-    try {
-      await page.goto(session.config.url, { waitUntil: 'domcontentloaded' });
-    } catch (error) {
-      this.logger.error(`[BrowserService] Не вдалось відкрити ${session.config.url} для клієнта ${clientId}:`, error);
-      throw error;
-    }
-
-    const safeForbiddenRoutes = (session.config.forbiddenRoutes || [])
-      .map(r => r.trim())
-      .filter(r => r.length > 0 && r !== '/');
-
-    if (safeForbiddenRoutes.length > 0) {
-      const normalizeUrlNode = (u: string) => {
-        try {
-          const parsed = new URL(u);
-          return (parsed.hostname + parsed.pathname).replace(/\/+$/, '');
-        } catch (e) {
-          return u.replace(/\/+$/, '');
-        }
-      };
-
-      const normalizedForbiddenRoutes = safeForbiddenRoutes.map(normalizeUrlNode);
-
-      page.on('framenavigated', async (frame) => {
-        if (frame === page.mainFrame()) {
-          const currentUrl = frame.url();
-
-          this.apiClient.emit('session.log.event', {
-            sessionId,
-            userId,
-            eventType: SessionEventType.Other,
-            severity: LogSeverity.Info,
-            message: `[Browser] Перехід на сторінку: ${currentUrl}`,
-            isIncident: false
-          });
-          const currentNorm = normalizeUrlNode(currentUrl);
-
-          const isForbidden = normalizedForbiddenRoutes.some(fr => currentNorm.includes(fr));
-
-          if (isForbidden) {
-            this.apiClient.emit('notification.send', {
-              userId: userId,
-              typeName: NotificationEventType.WORKER_ERROR,
-              content: {
-                subject: `[BrowserService] Заборонений роут`,
-                body: `[BrowserService] Відловлено заборонений роут: ${currentUrl}.`,
-              },
-              sendEmail: true,
-            });
-            this.apiClient.emit('session.log.event', {
-              sessionId,
-              userId,
-              eventType: SessionEventType.ForbiddenAction,
-              severity: LogSeverity.Critical,
-              message: `[BrowserService] Відловлено заборонений роут: ${currentUrl}.`,
-              isIncident: true
-            });
-            try {
-              const response = await page.goBack({ waitUntil: 'domcontentloaded' });
-              if (!response) {
-                await page.goto(session.config.url);
-              }
-            } catch (e) {
-              await page.goto(session.config.url);
-            }
-          }
-        }
+        return route.continue().catch(() => undefined);
       });
-    }
 
-    let cdpSession;
-    try {
-      cdpSession = await page.context().newCDPSession(page);
-      await cdpSession.send('Page.startScreencast', {
+      // Кожен перехід сторінкою - у журнал (ТЗ 9).
+      page.on('framenavigated', (frame) => {
+        if (frame !== page.mainFrame()) return;
+        const current = frame.url();
+        if (!current || current === 'about:blank' || session.loginInProgress) return;
+        this.log(sessionId, userId, SessionEventType.Navigation, `Перехід: ${current}`);
+      });
+
+      await page.goto(session.url, { waitUntil: 'domcontentloaded' });
+
+      const cdp = await page.context().newCDPSession(page);
+      let lastFrame: Buffer | null = null;
+      cdp.on('Page.screencastFrame', (frame) => {
+        cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => undefined);
+        lastFrame = Buffer.from(frame.data, 'base64');
+      });
+      await cdp.send('Page.startScreencast', {
         format: 'jpeg',
-        quality: 90,
-        maxWidth: session.config.viewport.width,
-        maxHeight: session.config.viewport.height,
+        quality: session.stream.quality,
+        maxWidth: session.viewport.width,
+        maxHeight: session.viewport.height,
       });
+      // Кадри з постійною частотою: екран без змін не «мерехтить» і не зависає.
+      client.frameTimer = setInterval(() => {
+        if (lastFrame) onFrame(lastFrame);
+      }, 1000 / session.stream.fps);
+
+      this.log(sessionId, userId, SessionEventType.Other, `Вкладку користувача ${userId} відкрито`);
+
+      // Автологін - один раз на сесію, на першій вкладці; далі всі вкладки мають спільні cookie.
+      const strategy = this.authRegistry.get(session.url);
+      if (strategy && !session.loginStarted) {
+        session.loginStarted = true;
+        session.loginInProgress = true;
+        strategy
+          .login(page, session.authData)
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            this.log(sessionId, userId, SessionEventType.SessionError, `Помилка автологіну: ${message}`, LogSeverity.Warning);
+          })
+          .finally(() => {
+            session.loginInProgress = false;
+            this.log(sessionId, userId, SessionEventType.Other, 'Автологін завершено');
+          });
+      }
     } catch (error) {
-      this.logger.error(`[BrowserService] Не вдалось запустити CDP screencast для клієнта ${clientId}:`, error);
-      throw error;
-    }
-
-    let lastFrameBuffer: Buffer | null = null;
-    const clientKey = `${sessionId}_${clientId}`;
-
-    cdpSession.on('Page.screencastFrame', (frameObject) => {
-      cdpSession.send('Page.screencastFrameAck', { sessionId: frameObject.sessionId }).catch(() => { });
-      lastFrameBuffer = Buffer.from(frameObject.data, 'base64');
-    });
-
-    const TARGET_FPS = 24;
-    const interval = setInterval(() => {
-      if (lastFrameBuffer) {
-        onFrame(lastFrameBuffer);
-      }
-    }, 1000 / TARGET_FPS);
-    this.frameIntervals.set(clientKey, interval);
-    const strategy = this.authRegistry.get(session.config.url);
-    if (strategy && !session.interactiveLoginStarted) {
-      session.interactiveLoginStarted = true;
-
-      strategy.login(page, session.config.authData).catch(error => {
-        this.logger.error(`[BrowserService] Помилка автологіну: ${error}`);
-        this.apiClient.emit('session.log.event', {
-          sessionId, userId,
-          eventType: SessionEventType.SessionError,
-          severity: LogSeverity.Warning,
-          message: `[BrowserService] Помилка автологіну: ${error instanceof Error ? error.message : String(error)}`,
-          isIncident: false
-        });
-      });
-    }
-    this.apiClient.emit('session.log.event', {
-      sessionId,
-      userId: userId,
-      eventType: SessionEventType.Other,
-      severity: LogSeverity.Warning,
-      message: `[BrowserService] Вкладку для користувача ${userId} створено.`,
-      isIncident: false
-    });
-    return page;
-    } catch (error) {
-      this.logger.error(`[BrowserService] Помилка налаштування вкладки для клієнта ${clientId}:`, error);
-
-      const clientKeyOnFail = `${sessionId}_${clientId}`;
-      const intervalOnFail = this.frameIntervals.get(clientKeyOnFail);
-      if (intervalOnFail) {
-        clearInterval(intervalOnFail);
-        this.frameIntervals.delete(clientKeyOnFail);
-      }
-
-      this.activePages.get(sessionId)?.delete(clientId);
-
-      if (!page.isClosed()) {
-        await page.close().catch(() => { });
-      }
-
-      this.apiClient.emit('session.log.event', {
-        sessionId, userId,
-        eventType: SessionEventType.SessionError,
-        severity: LogSeverity.Critical,
-        message: `[BrowserService] Помилка налаштування вкладки: ${error instanceof Error ? error.message : String(error)}`,
-        isIncident: true,
-      });
-
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Помилка відкриття вкладки ${key}: ${message}`);
+      await this.removePageForClient(sessionId, clientId);
+      this.log(sessionId, userId, SessionEventType.SessionError, `Помилка відкриття вкладки: ${message}`, LogSeverity.Critical, true);
       throw error;
     }
   }
 
   async removePageForClient(sessionId: string, clientId: string) {
-    const clientKey = `${sessionId}_${clientId}`;
-
-    const interval = this.frameIntervals.get(clientKey);
-    if (interval) {
-      clearInterval(interval);
-      this.frameIntervals.delete(clientKey);
-    }
-
-    const page = this.activePages.get(sessionId)?.get(clientId);
-    if (page) {
-      try {
-        if (!page.isClosed()) {
-          await page.close();
-        }
-      } catch (e) {
-        this.logger.debug(`[BrowserService] Помилка закриття вкладки ${clientKey}: ${e}`);
-      } finally {
-        this.activePages.get(sessionId)?.delete(clientId);
-      }
-    }
+    const key = this.key(sessionId, clientId);
+    const client = this.pages.get(key);
+    if (!client) return;
+    this.pages.delete(key);
+    if (client.frameTimer) clearInterval(client.frameTimer);
+    await client.page.close().catch(() => undefined);
   }
 
-  async interact(sessionId: string, clientId: string, userId: string, action: any) {
-    const page = this.activePages.get(sessionId)?.get(clientId);
-    if (!page) return;
+  // ---------- Дії користувача ----------
 
-    const clientKey = `${sessionId}_${clientId}`;
-    if (action.type === 'mousemove' || action.type === 'wheel') {
-      try {
-        if (action.type === 'mousemove') {
-          await page.mouse.move(action.x, action.y);
-        } else if (action.type === 'wheel') {
-          await page.mouse.wheel(action.deltaX, action.deltaY);
-        }
-      } catch (e) {
-        this.logger.debug(`[Browser] Помилка миттєвої дії: ${(e as Error).message}`);
-      }
+  async interact(sessionId: string, clientId: string, action: any) {
+    const key = this.key(sessionId, clientId);
+    const client = this.pages.get(key);
+    if (!client) return;
+    const { page } = client;
+
+    if (action.type === 'mousemove') {
+      await page.mouse.move(action.x, action.y).catch(() => undefined);
+      return;
+    }
+    if (action.type === 'wheel') {
+      await page.mouse.wheel(action.deltaX, action.deltaY).catch(() => undefined);
+      this.reportActivity(sessionId, client);
       return;
     }
 
-    const previousAction = this.actionQueues.get(clientKey) || Promise.resolve();
-
-    const currentAction = previousAction.then(async () => {
+    const previous = this.actionQueues.get(key) || Promise.resolve();
+    const current = previous.then(async () => {
       try {
         switch (action.type) {
-          case 'mousedown': {
-            const downBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-
-            if (action.x !== undefined && action.y !== undefined) {
-              await page.mouse.move(action.x, action.y);
-            }
-            await page.mouse.down({ button: downBtn });
-
+          case 'mousedown':
+          case 'mouseup':
+            // Лише ліва кнопка: права кнопка в трансляції заблокована повністю (ТЗ 7.1).
+            if (action.button !== undefined && action.button !== 0) return;
+            if (action.x !== undefined && action.y !== undefined) await page.mouse.move(action.x, action.y);
+            await (action.type === 'mousedown' ? page.mouse.down() : page.mouse.up());
             break;
-          }
-          case 'mouseup': {
-            const upBtn = action.button === 2 ? 'right' : action.button === 1 ? 'middle' : 'left';
-
-            if (action.x !== undefined && action.y !== undefined) {
-              await page.mouse.move(action.x, action.y);
-            }
-            await page.mouse.up({ button: upBtn });
-            break;
-          }
           case 'keydown':
             await page.keyboard.down(action.key);
             break;
           case 'keyup':
             await page.keyboard.up(action.key);
             break;
-          case 'navigate_back': {
-            try {
-              const response = await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 });
-              if (!response) {
-                this.logger.debug(`[Browser] goBack: історія навігації порожня для ${clientKey}`);
-              }
-            } catch (e) {
-              this.logger.debug(`[Browser] Помилка goBack для ${clientKey}: ${(e as Error).message}`);
-            }
+          case 'text':
+            if (typeof action.text === 'string' && action.text.length <= 5000) await page.keyboard.insertText(action.text);
             break;
-          }
-          case 'navigate_forward': {
-            try {
-              await page.goForward({ waitUntil: 'domcontentloaded', timeout: 10000 });
-            } catch (e) {
-              this.logger.debug(`[Browser] Помилка goForward для ${clientKey}: ${(e as Error).message}`);
-            }
+          case 'navigate_back':
+            await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => undefined);
             break;
-          }
+          case 'navigate_forward':
+            await page.goForward({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => undefined);
+            break;
+          default:
+            return;
         }
+        this.reportActivity(sessionId, client);
       } catch (e) {
-        this.logger.debug(`[Browser] Помилка черги: ${(e as Error).message}`);
+        this.logger.debug(`Помилка дії ${action.type} у ${key}: ${(e as Error).message}`);
       }
     });
 
-    this.actionQueues.set(clientKey, currentAction);
-    currentAction.finally(() => {
-      if (this.actionQueues.get(clientKey) === currentAction) {
-        this.actionQueues.delete(clientKey);
-      }
+    this.actionQueues.set(key, current);
+    current.finally(() => {
+      if (this.actionQueues.get(key) === current) this.actionQueues.delete(key);
     });
   }
 }

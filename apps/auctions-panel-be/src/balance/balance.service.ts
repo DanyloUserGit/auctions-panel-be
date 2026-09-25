@@ -1,31 +1,41 @@
 import { Injectable } from '@nestjs/common';
-import { ExternalDbManager } from '../client-db/client-db.service';
+import { CLIENT_DB, ExternalDbManager } from '../client-db/client-db.service';
 
 @Injectable()
 export class BalanceService {
     constructor(private dbManager: ExternalDbManager) { }
 
-    // 1. Отримання унікальних клієнтів (поле `zamovnyk`)
-    async getClients(dbName: string): Promise<string[]> {
-        const pool = await this.dbManager.getConnection(dbName);
+    // 1. Отримання унікальних клієнтів (поле `zamovnyk`) у межах доступних користувачу (null - усі).
+    async getClients(allowedClients: string[] | null): Promise<string[]> {
+        if (allowedClients && allowedClients.length === 0) return [];
+        const pool = await this.dbManager.getConnection(CLIENT_DB.crm);
 
-        const [rows]: any = await pool.execute(
-            `SELECT DISTINCT zamovnyk FROM transport_payments 
-       WHERE zamovnyk IS NOT NULL AND zamovnyk != '' 
-       ORDER BY zamovnyk ASC`
+        const scope = allowedClients ? ` AND zamovnyk IN (${allowedClients.map(() => '?').join(',')})` : '';
+        const [rows]: any = await pool.query(
+            `SELECT DISTINCT zamovnyk FROM transport_payments
+       WHERE zamovnyk IS NOT NULL AND zamovnyk != ''${scope}
+       ORDER BY zamovnyk ASC`,
+            allowedClients ?? [],
         );
 
         return rows.map((r: any) => r.zamovnyk);
     }
 
     // 2. Отримання даних балансу
-    async getBalances(dbName: string, clientFilter?: string, asof?: string) {
-        const pool = await this.dbManager.getConnection(dbName);
+    async getBalances(allowedClients: string[] | null, clientFilter?: string, asof?: string) {
+        if (allowedClients && allowedClients.length === 0) return [];
+        const pool = await this.dbManager.getConnection(CLIENT_DB.crm);
 
         // Використовуємо WHERE 1=1 для зручного додавання умов
         let query = `SELECT id, marka_model, numer_vin, zamovnyk, to_pay_usd, to_pay_eur, to_pay_pln, to_pay_uah, extra_notes, transport_date 
                  FROM transport_payments WHERE 1=1`;
         const params: any[] = [];
+
+        // Лише клієнти, доступні користувачу
+        if (allowedClients) {
+            query += ` AND zamovnyk IN (${allowedClients.map(() => '?').join(',')})`;
+            params.push(...allowedClients);
+        }
 
         // Фільтр по клієнту
         if (clientFilter && clientFilter !== 'ALL') {

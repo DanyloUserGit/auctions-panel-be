@@ -1,10 +1,11 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBody, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
 import { RolesGuard } from '../auth/roles.guard';
 import { RolesDecorator } from '../decorators/roles.decorator';
-import { CreateInfoPageDto, CreateTrainingDto, UpdateInfoPageDto } from './dto/create-training.dto';
+import { CreateInfoPageSchema, CreateTrainingSchema, UpdateInfoPageSchema, UpdateTrainingSchema } from './dto/create-training.dto';
 import { TrainingService } from './training.service';
 
 @ApiTags('Training & Information')
@@ -21,6 +22,7 @@ export class TrainingController {
         return this.trainingService.getAllInfoPages(search);
     }
 
+    @Audit('content.info.update', 'Змінено сторінку «Інформація» «{result.title}»')
     @Patch('info/:id')
     @UseGuards(RolesGuard)
     @RolesDecorator(Roles.SuperAdmin)
@@ -30,9 +32,9 @@ export class TrainingController {
     @ApiResponse({ status: 404, description: 'Сторінку не знайдено.' })
     updateInfoPage(
         @Param('id') id: string,
-        @Body() dto: UpdateInfoPageDto
+        @Body() body: unknown
     ) {
-        return this.trainingService.updateInfoPage(id, dto);
+        return this.trainingService.updateInfoPage(id, UpdateInfoPageSchema.parse(body));
     }
 
     @Get('info/:slug')
@@ -44,14 +46,15 @@ export class TrainingController {
         return this.trainingService.getInfoPageBySlug(slug);
     }
 
+    @Audit('content.info.create', 'Створено сторінку «Інформація» «{result.title}»')
     @Post('info')
     @UseGuards(RolesGuard)
     @RolesDecorator(Roles.SuperAdmin)
     @ApiOperation({ summary: 'Створити нову інформаційну сторінку (Тільки SuperAdmin)' })
     @ApiResponse({ status: 201, description: 'Сторінку успішно створено.' })
     @ApiResponse({ status: 403, description: 'Доступ заборонено.' })
-    createInfoPage(@Body() dto: CreateInfoPageDto) {
-        return this.trainingService.createInfoPage(dto);
+    createInfoPage(@Body() body: unknown) {
+        return this.trainingService.createInfoPage(CreateInfoPageSchema.parse(body));
     }
 
     @Get('materials')
@@ -72,6 +75,7 @@ export class TrainingController {
         return this.trainingService.getTrainingMaterialById(id, req.user);
     }
 
+    @Audit('content.training.update', 'Змінено навчальний матеріал «{result.title}»')
     @Patch('materials/:id')
     @UseGuards(RolesGuard)
     @RolesDecorator(Roles.SuperAdmin, Roles.Admin)
@@ -83,21 +87,23 @@ export class TrainingController {
     updateMaterial(
         @Param('id') id: string,
         @Req() req,
-        @Body() dto: CreateTrainingDto
+        @Body() body: unknown
     ) {
-        return this.trainingService.updateTrainingMaterial(id, req.user, dto);
+        return this.trainingService.updateTrainingMaterial(id, req.user, UpdateTrainingSchema.parse(body));
     }
 
+    @Audit('content.training.create', 'Створено навчальний матеріал «{result.title}»')
     @Post('materials')
     @UseGuards(RolesGuard)
     @RolesDecorator(Roles.SuperAdmin, Roles.Admin)
     @ApiOperation({ summary: 'Створити новий навчальний матеріал (SuperAdmin, Admin)' })
     @ApiResponse({ status: 201, description: 'Матеріал успішно створено.' })
     @ApiResponse({ status: 403, description: 'Тільки адміністратори можуть створювати матеріали.' })
-    createMaterial(@Req() req, @Body() dto: CreateTrainingDto) {
-        return this.trainingService.createTrainingMaterial(req.user, dto);
+    createMaterial(@Req() req, @Body() body: unknown) {
+        return this.trainingService.createTrainingMaterial(req.user, CreateTrainingSchema.parse(body));
     }
 
+    @Audit('content.training.publish', 'Змінено публікацію навчального матеріалу {params.id}')
     @Patch('materials/:id/publish')
     @UseGuards(RolesGuard)
     @RolesDecorator(Roles.SuperAdmin, Roles.Admin)

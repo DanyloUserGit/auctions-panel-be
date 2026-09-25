@@ -53,6 +53,8 @@ services:
       - mysql-caddylc2
     volumes:
       - ./apps/auctions-panel-be/.env:/app/.env
+      # Завантажені файли (фото авто, зображення навчання) - поза контейнером, щоб не зникали при перезбиранні.
+      - uploads_data:/app/uploads
     env_file:
       - ./apps/auctions-panel-be/.env
     ports:
@@ -70,13 +72,15 @@ services:
     shm_size: '3gb' # 3gb max on prod!
     env_file:
       - .env
+    # WEBRTC_*, STREAM_* - з .env (див. .env.example). Адреса для браузера за замовчуванням -
+    # 127.0.0.1 (локальний запуск); на сервері вкажіть публічну IP у .env: WEBRTC_ANNOUNCED_IP=...
     environment:
       - RABBITMQ_URL=amqp://rabbitmq:5672
-      - NODE_ENV=development
-      - WEBRTC_ANNOUNCED_IP=127.0.0.1
+      - WEBRTC_ANNOUNCED_IP=${WEBRTC_ANNOUNCED_IP:-127.0.0.1}
     ports:
       - "10000-10050:10000-10050/udp"
 volumes:
+  uploads_data:
   postgres_data:
   client_mysql_data:
   caddylc2_mysql_data:

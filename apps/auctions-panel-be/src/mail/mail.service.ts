@@ -6,7 +6,7 @@ import { SendGridClient } from './sendgrid-client';
 export class MailService {
   constructor(private readonly sendGridClient: SendGridClient) {}
 
-  async send(recipient: string, body: string, subject: string): Promise<void> {
+  async send(recipient: string, subject: string, body: string): Promise<void> {
     const mail: MailDataRequired = {
       to: recipient,
       from: process.env.SENDGRID_CLIENT_ID!,

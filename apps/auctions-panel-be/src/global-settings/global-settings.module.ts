@@ -6,6 +6,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 @Module({
   imports: [PrismaModule],
   providers: [GlobalSettingsService],
-  controllers: [GlobalSettingsController]
+  controllers: [GlobalSettingsController],
+  exports: [GlobalSettingsService],
 })
 export class GlobalSettingsModule { }

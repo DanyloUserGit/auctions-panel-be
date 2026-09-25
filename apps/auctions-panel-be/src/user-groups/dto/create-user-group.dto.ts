@@ -4,7 +4,10 @@ import { z } from 'zod';
 export const CreateUserGroupSchema = z.object({
   name: z.string().min(1),
   canGaManageAccounts: z.boolean().optional(),
+  canGaManageRules: z.boolean().optional(),
   showAccounts: z.boolean().optional(),
+  // Ліміт одночасних сесій учасників групи; 0 - без ліміту.
+  sessionLimit: z.number().int().min(0).optional(),
   rules: z.any().optional(),
   allowedProfileFields: z.array(z.string()).optional(),
   allowedAuctions: z.array(z.string().uuid()).optional(),
@@ -23,6 +26,9 @@ export class CreateUserGroupSwaggerDto implements CreateUserGroupDto {
 
   @ApiPropertyOptional()
   showAccounts?: boolean;
+
+  @ApiPropertyOptional({ example: 0 })
+  sessionLimit?: number;
 
   @ApiPropertyOptional()
   rules?: Record<string, any>;

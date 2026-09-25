@@ -1,12 +1,22 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Roles, User } from '@prisma/client';
 import { AccessService, type AccessUser } from '../access/access.service';
 import { SAFE_AUTH_SELECT, accountSelectFor } from '../auction-auth/auction-auth.select';
 import { PrismaService } from '../prisma/prisma.service';
+import { canPurchase } from '../users/access-status';
+import { encryptData } from '../utils/encrypt';
 import { AddPathDto } from './dto/add-path.dto';
 import { AddSelectorDto } from './dto/add-selector.dto';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
+
+// Зашифрований URL проксі + хост для відображення. undefined - не змінювати, '' - прибрати.
+function proxyData(proxyUrl: string | undefined) {
+  if (proxyUrl === undefined) return {};
+  if (!proxyUrl) return { proxyUrl: null, proxyHost: null };
+  const parsed = new URL(proxyUrl);
+  return { proxyUrl: encryptData(proxyUrl), proxyHost: `${parsed.protocol}//${parsed.host}` };
+}
 
 @Injectable()
 export class AuctionsService {
@@ -18,11 +28,12 @@ export class AuctionsService {
   // Створення/редагування/видалення аукціонів та їхніх правил - лише SuperAdmin (RolesGuard у контролері).
   // Новий аукціон не додається до жодної групи користувачів автоматично.
   async create(createAuctionDto: CreateAuctionDto) {
-    const { sessions, auctionAuths, auctionGroupId, ...rest } = createAuctionDto;
+    const { sessions, auctionAuths, auctionGroupId, proxyUrl, ...rest } = createAuctionDto;
 
     const auction = await this.prismaService.auction.create({
       data: {
         ...rest,
+        ...proxyData(proxyUrl),
 
         ...(auctionGroupId && {
           auctionGroup: {
@@ -84,13 +95,14 @@ export class AuctionsService {
   }
 
   async update(id: string, updateAuctionDto: UpdateAuctionDto) {
-    const { sessions, auctionAuths, auctionGroupId, ...rest } = updateAuctionDto;
+    const { sessions, auctionAuths, auctionGroupId, proxyUrl, ...rest } = updateAuctionDto;
 
     try {
       return await this.prismaService.auction.update({
         where: { id },
         data: {
           ...rest,
+          ...proxyData(proxyUrl),
 
           ...(auctionGroupId !== undefined && {
             auctionGroup: auctionGroupId
@@ -124,15 +136,13 @@ export class AuctionsService {
     }
   }
 
+  // Видалення аукціону разом з акаунтами, правилами та історією його сесій (каскадно в БД).
+  // Поки на аукціоні працюють користувачі, видалити його не можна.
   async remove(id: string) {
-    await this.prismaService.session.deleteMany({
-      where: { auctionId: id },
-    });
-
-    await this.prismaService.auctionAuth.deleteMany({
-      where: { auctionId: id }
-    })
-
+    const active = await this.prismaService.session.count({ where: { auctionId: id, isActive: true } });
+    if (active > 0) {
+      throw new ConflictException('На аукціоні є активні сесії - спершу завершіть їх у «Всіх діях»');
+    }
     return await this.prismaService.auction.delete({
       where: { id },
     });
@@ -264,9 +274,7 @@ export class AuctionsService {
 
     if (user.role === Roles.SuperAdmin) return selectors;
 
-    const canBuy = user.sessionRights === 'Buy' || user.sessionRights === 'All';
-
-    if (canBuy) {
+    if (canPurchase(user)) {
       return selectors.filter(selector => selector.isBuyAction === false);
     }
     return selectors;

@@ -1,7 +1,11 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import { Audit } from '../audit-log/audit.decorator';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiParam, ApiProperty, ApiQuery, ApiResponse } from '@nestjs/swagger';
-import { NotificationChannel } from '@prisma/client';
-import { Public } from '../decorators/public.decorator';
+import { NotificationChannel, Roles } from '@prisma/client';
+import { z } from 'zod';
+import { RolesGuard } from '../auth/roles.guard';
+import { RolesDecorator } from '../decorators/roles.decorator';
+import { ReminderSchema, RemindersService } from './reminders.service';
 import { NotificationService } from './notification.service';
 
 class UpdateSettingsDto {
@@ -18,6 +22,15 @@ class UpdateSettingsDto {
     value?: number;
 }
 
+const UpdateSettingsSchema = z.object({
+    typeId: z.string().uuid(),
+    isEnabled: z.boolean().optional(),
+    channels: z.array(z.nativeEnum(NotificationChannel)).optional(),
+    value: z.number().int().min(0).optional(),
+});
+
+const SetGroupRequirementSchema = z.object({ typeId: z.string().uuid(), isMandatory: z.boolean() });
+
 class SetGroupRequirementDto {
     @ApiProperty({ description: 'ID типу сповіщення', example: '123e4567-e89b-12d3-a456-426614174000' })
     typeId!: string;
@@ -28,7 +41,26 @@ class SetGroupRequirementDto {
 
 @Controller('notifications')
 export class NotificationController {
-    constructor(private readonly notificationService: NotificationService) { }
+    constructor(
+        private readonly notificationService: NotificationService,
+        private readonly reminders: RemindersService,
+    ) { }
+
+    // Нагадування про завершення аукціону (ТЗ 15).
+    @Get('reminders')
+    listReminders(@Req() req) {
+        return this.reminders.list(req.user.id);
+    }
+
+    @Post('reminders')
+    createReminder(@Req() req, @Body() body: unknown) {
+        return this.reminders.create(req.user.id, ReminderSchema.parse(body));
+    }
+
+    @Delete('reminders/:id')
+    removeReminder(@Req() req, @Param('id') id: string) {
+        return this.reminders.remove(req.user.id, id);
+    }
 
     @Get('settings')
     async getMySettings(@Req() req) {
@@ -41,7 +73,8 @@ export class NotificationController {
         return this.notificationService.getMyAdminGroups(req.user.id);
     }
 
-    @Public()
+    @UseGuards(RolesGuard)
+    @RolesDecorator(Roles.SuperAdmin)
     @ApiOperation({ summary: 'Заповнити базу початковими типами сповіщень (Seed)' })
     @ApiResponse({ status: 201, description: 'Типи сповіщень успішно додані/оновлені.' })
     @Post('seed')
@@ -56,8 +89,9 @@ export class NotificationController {
     @ApiResponse({ status: 400, description: 'Помилка валідації або спроба вимкнути обов\'язкове сповіщення.' })
     async updateMySettings(
         @Req() req,
-        @Body() body: UpdateSettingsDto
+        @Body() raw: unknown
     ) {
+        const body = UpdateSettingsSchema.parse(raw);
         return this.notificationService.updateSettings(req.user.id, body.typeId, {
             isEnabled: body.isEnabled,
             channels: body.channels,
@@ -95,6 +129,7 @@ export class NotificationController {
         return this.notificationService.getGroupRequirements(req.user.id, groupId);
     }
 
+    @Audit('notifications.group-requirement', 'Змінено обов’язкові сповіщення групи {params.groupId}')
     @Patch('group/:groupId/requirements')
     @ApiOperation({ summary: 'Встановити обов\'язкове сповіщення для групи (Тільки для Адмінів групи)' })
     @ApiParam({ name: 'groupId', required: true, description: 'ID групи користувачів (UserGroup)' })
@@ -104,8 +139,9 @@ export class NotificationController {
     async setGroupRequirement(
         @Req() req,
         @Param('groupId') groupId: string,
-        @Body() body: SetGroupRequirementDto
+        @Body() raw: unknown
     ) {
+        const body = SetGroupRequirementSchema.parse(raw);
         return this.notificationService.setGroupMandatoryRequirement(req.user.id, groupId, body.typeId, body.isMandatory);
     }
 }

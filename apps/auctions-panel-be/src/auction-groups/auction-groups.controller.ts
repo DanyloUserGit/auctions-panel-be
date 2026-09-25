@@ -1,3 +1,4 @@
+import { Audit } from '../audit-log/audit.decorator';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBody, ApiCreatedResponse, getSchemaPath } from '@nestjs/swagger';
 import { Roles } from '@prisma/client';
@@ -26,6 +27,7 @@ export class AuctionGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction-group.add-auction', 'До групи аукціонів {params.id} додано аукціон {body.auctionId}')
   @Post(':id/add-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
@@ -41,6 +43,7 @@ export class AuctionGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction-group.remove-auction', 'З групи аукціонів {params.id} прибрано аукціон {body.auctionId}')
   @Delete(':id/remove-auction')
   @ApiBody({ type: AddAuctionSwaggerDto })
   @ApiCreatedResponse({
@@ -56,6 +59,7 @@ export class AuctionGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction-group.create', 'Створено групу аукціонів «{result.title}»')
   @Post()
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
@@ -89,6 +93,7 @@ export class AuctionGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction-group.update', 'Змінено групу аукціонів «{result.title}»')
   @Patch(':id')
   @ApiBody({ type: CreateAuctionGroupSwaggerDto })
   @ApiCreatedResponse({
@@ -112,6 +117,7 @@ export class AuctionGroupsController {
 
   @UseGuards(RolesGuard)
   @RolesDecorator(Roles.SuperAdmin)
+  @Audit('catalog.auction-group.delete', 'Видалено групу аукціонів {params.id}')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.auctionGroupsService.remove(id);

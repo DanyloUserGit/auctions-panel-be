@@ -1,33 +1,25 @@
-import { Controller, Get, Req, Query, UseGuards, ParseIntPipe, Patch, Param, Body } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Query, Req } from '@nestjs/common';
 import { WonCarsService } from './won-cars.service';
-import { Roles } from '@prisma/client';
-// import { JwtAuthGuard } from './guards/jwt-auth.guard'; // Ваш гард
 
-@Controller('api/purchases')
+@Controller('purchases')
 export class WonCarsController {
     constructor(private readonly wonCarsService: WonCarsService) { }
 
-    // @UseGuards(JwtAuthGuard)
     @Get()
-    async getPurchases(@Req() req, @Query('dbName') dbName: string, @Query('page') page = 1) {
-        const userId = req.user.id; 
-        const isAdmin = req.user.role === Roles.SuperAdmin; 
-
+    async getPurchases(@Req() req, @Query('page') page = '1') {
         const limit = 20;
-        const offset = (page - 1) * limit;
+        const offset = (Math.max(1, Number(page) || 1) - 1) * limit;
+        return this.wonCarsService.getWonCarsData(req.user, limit, offset);
+    }
 
-        return this.wonCarsService.getWonCarsData(dbName, userId, isAdmin, limit, offset);
+    // Дані авто для форми «Виставити на продаж».
+    @Get(':id')
+    getPurchase(@Req() req, @Param('id', ParseIntPipe) id: number) {
+        return this.wonCarsService.getWonCar(req.user, id);
     }
 
     @Patch(':id/status')
-    async updateStatus(
-        @Req() req,
-        @Param('id', ParseIntPipe) id: number,
-        @Body('status', ParseIntPipe) status: number,
-        @Body('dbName') dbName: string
-    ) {
-        const isAdmin = req.user.role === Roles.SuperAdmin;
-
-        return this.wonCarsService.updateCarStatus(dbName, id, status, isAdmin);
+    updateStatus(@Req() req, @Param('id', ParseIntPipe) id: number, @Body('status', ParseIntPipe) status: number) {
+        return this.wonCarsService.updateCarStatus(req.user, id, status);
     }
 }

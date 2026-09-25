@@ -1,6 +1,19 @@
 import { Injectable, OnModuleDestroy, BadRequestException, Logger } from '@nestjs/common';
 import * as mysql from 'mysql2/promise';
 
+// Бази CRM замовника визначає сервер, а не клієнт: ім'я бази з запиту ніколи не використовується.
+// main - основна база (замовлення, авто, покупки, аналітика); crm - CRM роботи з клієнтами
+// (процеси, баланси, розрахунок).
+// Геттери, а не значення: .env читається вже після імпорту модулів.
+export const CLIENT_DB = {
+    get main() {
+        return process.env.CLIENT_DB_MAIN || 'caddylc2_caddycombca';
+    },
+    get crm() {
+        return process.env.CLIENT_DB_CRM || 'table_extourcars1';
+    },
+};
+
 @Injectable()
 export class ExternalDbManager implements OnModuleDestroy {
     private connections = new Map<string, mysql.Pool>();
@@ -13,11 +26,11 @@ export class ExternalDbManager implements OnModuleDestroy {
         const prefix = `DB_${dbName.toUpperCase()}`;
         const config = {
             host: process.env[`${prefix}_HOST`],
+            port: process.env[`${prefix}_PORT`] ? Number(process.env[`${prefix}_PORT`]) : undefined,
             user: process.env[`${prefix}_USER`],
             password: process.env[`${prefix}_PASS`],
             database: dbName,
         };
-        console.log(`Connecting to ${dbName} at ${config.host} as ${config.user}`);
         if (!config.host || !config.user) {
             throw new BadRequestException(`Конфігурація для БД ${dbName} відсутня в .env`);
         }

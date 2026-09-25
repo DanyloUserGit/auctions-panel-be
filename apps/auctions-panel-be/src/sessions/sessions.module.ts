@@ -1,14 +1,17 @@
 import { Module } from '@nestjs/common';
-import { AccessModule } from '../access/access.module';
 import { JwtModule } from '@nestjs/jwt';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { SessionsController } from './sessions.controller';
-import { PrismaModule } from '../prisma/prisma.module';
-import { SessionsService } from './sessions.service';
-import { SessionGateway } from './session.gateway';
-import { SessionsApiController } from './sessions-api.controller';
-import { SessionLoggerModule } from '../session-logger/session-logger.module';
+import { AccessModule } from '../access/access.module';
+import { GlobalSettingsModule } from '../global-settings/global-settings.module';
 import { NotificationModule } from '../notification/notification.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { SessionLoggerModule } from '../session-logger/session-logger.module';
+import { SessionGateway } from './session.gateway';
+import { SessionRoomNotifier } from './session-room.notifier';
+import { SessionRulesService } from './session-rules.service';
+import { SessionsApiController } from './sessions-api.controller';
+import { SessionsController } from './sessions.controller';
+import { SessionsService } from './sessions.service';
 
 @Module({
   imports: [
@@ -30,9 +33,11 @@ import { NotificationModule } from '../notification/notification.module';
     PrismaModule,
     AccessModule,
     SessionLoggerModule,
-    NotificationModule
+    NotificationModule,
+    GlobalSettingsModule,
   ],
   controllers: [SessionsController, SessionsApiController],
-  providers: [SessionsService, SessionGateway],
+  providers: [SessionsService, SessionGateway, SessionRoomNotifier, SessionRulesService],
+  exports: [SessionRulesService],
 })
 export class SessionsModule {}

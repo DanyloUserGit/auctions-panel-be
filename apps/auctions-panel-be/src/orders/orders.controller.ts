@@ -1,50 +1,34 @@
-import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { CreateOrderDto } from './dto/create-order.dto';
-import { UpdateOrderDto } from './dto/update-order.dto';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
+import { CreateOrderSchema } from './dto/create-order.dto';
+import { UpdateOrderSchema } from './dto/update-order.dto';
 import { OrdersService } from './orders.service';
 
 @Controller('orders')
 export class OrdersController {
     constructor(private readonly ordersService: OrdersService) { }
 
-    private getDbName(headers: Record<string, string>): string {
-        const dbName = headers['x-client-db'];
-        if (!dbName) {
-            throw new BadRequestException('Заголовок x-client-db обов\'язковий');
-        }
-        return dbName;
-    }
-
     @Post()
-    create(@Headers() headers, @Body() createOrderDto: CreateOrderDto, @Req() req) {
-        const dbName = this.getDbName(headers);
-        const user = req.user;
-        console.log(user)
-        return this.ordersService.create(dbName, createOrderDto, user);
+    create(@Body() body: unknown, @Req() req) {
+        return this.ordersService.create(CreateOrderSchema.parse(body), req.user);
     }
 
     @Get()
-    findAll(@Headers() headers, @Req() req, @Query('search') search?: string) {
-        const dbName = this.getDbName(headers);
-        const user = req.user;
-        return this.ordersService.findAll(dbName, user, search);
+    findAll(@Req() req, @Query('search') search?: string) {
+        return this.ordersService.findAll(req.user, search);
     }
 
     @Get(':id')
-    findOne(@Headers() headers, @Param('id') id: string) {
-        const dbName = this.getDbName(headers);
-        return this.ordersService.findOne(dbName, +id);
+    findOne(@Param('id', ParseIntPipe) id: number, @Req() req) {
+        return this.ordersService.findOne(id, req.user);
     }
 
     @Patch(':id')
-    update(@Headers() headers, @Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
-        const dbName = this.getDbName(headers);
-        return this.ordersService.update(dbName, +id, updateOrderDto);
+    update(@Param('id', ParseIntPipe) id: number, @Body() body: unknown, @Req() req) {
+        return this.ordersService.update(id, UpdateOrderSchema.parse(body), req.user);
     }
 
     @Delete(':id')
-    remove(@Headers() headers, @Param('id') id: string) {
-        const dbName = this.getDbName(headers);
-        return this.ordersService.remove(dbName, +id);
+    remove(@Param('id', ParseIntPipe) id: number, @Req() req) {
+        return this.ordersService.remove(id, req.user);
     }
 }
